@@ -25,6 +25,9 @@ import {
   ChevronUp,
   FileText,
   Play,
+  ImageIcon,
+  Zap,
+  Shield,
 } from "lucide-react";
 import {
   calculateRisk,
@@ -33,7 +36,6 @@ import {
   getRiskColor,
   getPriorityColor,
   type RiskResult,
-  type DetectionInput,
 } from "@/lib/risk-engine";
 import type {
   InfraType,
@@ -60,7 +62,6 @@ interface AnalysisResult {
   modelNote: string;
 }
 
-// Demo data for each infrastructure type
 const DEMO_RESULTS: Record<string, AnalysisResult> = {
   road: {
     success: true,
@@ -93,8 +94,7 @@ const DEMO_RESULTS: Record<string, AnalysisResult> = {
       0
     ),
     processingTimeMs: 1247,
-    modelNote:
-      "Demo analysis — these are sample detections, not real AI predictions.",
+    modelNote: "Demo analysis — these are sample detections, not real AI predictions.",
   },
   bridge: {
     success: true,
@@ -137,21 +137,12 @@ const DEMO_RESULTS: Record<string, AnalysisResult> = {
       0
     ),
     processingTimeMs: 1532,
-    modelNote:
-      "Demo analysis — these are sample detections, not real AI predictions.",
+    modelNote: "Demo analysis — these are sample detections, not real AI predictions.",
   },
   tunnel: {
     success: true,
     defects: [
-      {
-        defectType: "crack",
-        confidence: 0.72,
-        severity: "medium",
-        bboxX: 150,
-        bboxY: 80,
-        bboxWidth: 300,
-        bboxHeight: 40,
-      },
+      { defectType: "crack", confidence: 0.72, severity: "medium", bboxX: 150, bboxY: 80, bboxWidth: 300, bboxHeight: 40 },
     ],
     risk: calculateRisk(
       [{ defectType: "crack", confidence: 0.72, severity: "medium" }],
@@ -159,49 +150,33 @@ const DEMO_RESULTS: Record<string, AnalysisResult> = {
       0
     ),
     processingTimeMs: 980,
-    modelNote:
-      "Demo analysis — tunnel module is planned for future development.",
+    modelNote: "Demo analysis — tunnel module is planned for future development.",
   },
   water: {
     success: true,
-    defects: [
-      {
-        defectType: "corrosion",
-        confidence: 0.84,
-        severity: "high",
-      },
-    ],
+    defects: [{ defectType: "corrosion", confidence: 0.84, severity: "high" }],
     risk: calculateRisk(
       [{ defectType: "corrosion", confidence: 0.84, severity: "high" }],
       "water",
       0
     ),
     processingTimeMs: 1100,
-    modelNote:
-      "Demo analysis — water infrastructure module is planned for future development.",
+    modelNote: "Demo analysis — water infrastructure module is planned for future development.",
   },
   power: {
     success: true,
-    defects: [
-      {
-        defectType: "corrosion",
-        confidence: 0.69,
-        severity: "medium",
-      },
-    ],
+    defects: [{ defectType: "corrosion", confidence: 0.69, severity: "medium" }],
     risk: calculateRisk(
       [{ defectType: "corrosion", confidence: 0.69, severity: "medium" }],
       "power",
       0
     ),
     processingTimeMs: 1050,
-    modelNote:
-      "Demo analysis — power infrastructure module is planned for future development.",
+    modelNote: "Demo analysis — power infrastructure module is planned for future development.",
   },
 };
 
 export default function Inspect() {
-  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [infraType, setInfraType] = useState<InfraType | "">("");
@@ -209,7 +184,6 @@ export default function Inspect() {
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [factorsExpanded, setFactorsExpanded] = useState(false);
@@ -219,25 +193,19 @@ export default function Inspect() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      setSelectedFile(file);
       setResult(null);
       setIsDemo(false);
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
+      setPreviewUrl(URL.createObjectURL(file));
     },
     []
   );
 
   const handleAnalyze = async () => {
     if (!infraType) return;
-
     setIsAnalyzing(true);
     setResult(null);
-
-    // Simulate analysis delay
     await new Promise((resolve) => setTimeout(resolve, 1500 + Math.random() * 1000));
 
-    // Use demo data
     const demoResult = { ...DEMO_RESULTS[infraType] || DEMO_RESULTS.road };
     demoResult.risk = calculateRisk(
       demoResult.defects.map((d) => ({
@@ -260,7 +228,6 @@ export default function Inspect() {
     setLocation("");
     setNotes("");
     setPreviewUrl(null);
-    setSelectedFile(null);
     setResult(null);
     setIsDemo(false);
     setFactorsExpanded(false);
@@ -268,48 +235,59 @@ export default function Inspect() {
 
   return (
     <AppShell>
-      <div className="p-6 lg:p-8 max-w-[1400px] mx-auto">
-        <header className="mb-8">
-          <p className="text-sm font-medium text-muted-foreground">Analysis</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">
-            AI Inspection
-          </h1>
+      <div className="p-4 md:p-8 max-w-[1400px] mx-auto pb-24 md:pb-8">
+        {/* Header */}
+        <header className="mb-6 md:mb-8">
+          <div className="flex items-center gap-3 mb-1">
+            <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10">
+              <ScanSearch className="size-5 text-primary" />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+                Analysis Pipeline
+              </p>
+              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
+                AI Inspection
+              </h1>
+            </div>
+          </div>
         </header>
 
-        <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-          {/* Left: Upload & Config */}
-          <div className="space-y-6">
+        <div className="grid gap-5 md:gap-6 xl:grid-cols-[420px_1fr]">
+          {/* Left: Config & Upload */}
+          <div className="space-y-4 md:space-y-5">
             {/* Demo Banner */}
-            <Card className="border-amber-200 bg-amber-50/50 dark:border-amber-900/50 dark:bg-amber-950/20">
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <Play className="size-4 mt-0.5 text-amber-600 shrink-0" />
-                  <div>
-                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-                      Demo Mode Available
-                    </p>
-                    <p className="text-xs text-amber-700/80 dark:text-amber-300/60 mt-1">
-                      Click "Analyze with AI" without uploading an image to see sample results.
-                      Demo data is clearly labeled and not a real-time AI prediction.
-                    </p>
-                  </div>
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 shrink-0 mt-0.5">
+                  <Play className="size-4 text-primary" />
                 </div>
-              </CardContent>
-            </Card>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    Demo Mode
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                    Click "Analyze with AI" without uploading an image to see sample results.
+                    Demo data is clearly labeled.
+                  </p>
+                </div>
+              </div>
+            </div>
 
-            {/* Form */}
-            <Card className="border-border/70">
-              <CardHeader>
-                <CardTitle className="text-base">Configuration</CardTitle>
+            {/* Configuration Card */}
+            <Card className="bg-card border-border/60">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold text-foreground">
+                  Configuration
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Infrastructure Type *</Label>
-                  <Select
-                    value={infraType}
-                    onValueChange={(v) => setInfraType(v as InfraType)}
-                  >
-                    <SelectTrigger>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Infrastructure Type
+                  </Label>
+                  <Select value={infraType} onValueChange={(v) => setInfraType(v as InfraType)}>
+                    <SelectTrigger className="bg-surface-2 border-border/60">
                       <SelectValue placeholder="Select infrastructure type" />
                     </SelectTrigger>
                     <SelectContent>
@@ -322,41 +300,52 @@ export default function Inspect() {
                   </Select>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Asset ID</Label>
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Asset ID
+                    </Label>
                     <Input
                       placeholder="e.g., RD-001"
                       value={assetId}
                       onChange={(e) => setAssetId(e.target.value)}
+                      className="bg-surface-2 border-border/60"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Location</Label>
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Location
+                    </Label>
                     <Input
                       placeholder="e.g., Highway 101, MM 42"
                       value={location}
                       onChange={(e) => setLocation(e.target.value)}
+                      className="bg-surface-2 border-border/60"
                     />
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Notes (optional)</Label>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Notes (optional)
+                  </Label>
                   <Textarea
                     placeholder="Additional observations..."
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     rows={2}
+                    className="bg-surface-2 border-border/60 resize-none"
                   />
                 </div>
               </CardContent>
             </Card>
 
             {/* Image Upload */}
-            <Card className="border-border/70">
-              <CardHeader>
-                <CardTitle className="text-base">Image</CardTitle>
+            <Card className="bg-card border-border/60">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold text-foreground">
+                  Image
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <input
@@ -367,40 +356,46 @@ export default function Inspect() {
                   className="hidden"
                 />
                 {previewUrl ? (
-                  <div className="relative">
+                  <div className="relative group">
                     <img
                       src={previewUrl}
                       alt="Infrastructure preview"
-                      className="w-full rounded-lg border border-border object-cover max-h-80"
+                      className="w-full rounded-xl border border-border/60 object-cover max-h-72"
                     />
-                    <div className="absolute top-2 right-2 flex gap-2">
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-center justify-center">
                       <Button
                         size="sm"
                         variant="secondary"
                         onClick={() => {
                           setPreviewUrl(null);
-                          setSelectedFile(null);
                           setResult(null);
                           setIsDemo(false);
                           if (fileInputRef.current) fileInputRef.current.value = "";
                         }}
+                        className="bg-surface-2/90 border-border/60"
                       >
-                        Remove
+                        Remove Image
                       </Button>
                     </div>
                     {isDemo && (
                       <div className="absolute top-2 left-2">
-                        <Badge className="bg-amber-500 text-white">DEMO DATA</Badge>
+                        <Badge className="bg-amber-500/90 text-white text-[10px] border-0">
+                          DEMO DATA
+                        </Badge>
                       </div>
                     )}
                   </div>
                 ) : (
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex w-full flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-10 text-center hover:bg-muted/50 transition-colors"
+                    className="flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-border/60 bg-surface-2/50 p-8 md:p-10 text-center hover:border-primary/40 hover:bg-primary/[0.03] transition-all duration-200"
                   >
-                    <Upload className="size-8 text-muted-foreground mb-3" />
-                    <p className="text-sm font-medium">Click to upload infrastructure image</p>
+                    <div className="flex size-12 items-center justify-center rounded-xl bg-primary/10 mb-3">
+                      <Upload className="size-5 text-primary" />
+                    </div>
+                    <p className="text-sm font-medium text-foreground">
+                      Upload infrastructure image
+                    </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       JPG, PNG, or WebP — Max 10MB
                     </p>
@@ -409,12 +404,12 @@ export default function Inspect() {
               </CardContent>
             </Card>
 
-            {/* Actions */}
+            {/* Action Buttons */}
             <div className="flex gap-3">
               <Button
                 onClick={handleAnalyze}
                 disabled={!infraType || isAnalyzing}
-                className="gap-2 bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+                className="flex-1 gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_20px_oklch(0.72_0.15_220_/_0.2)] hover:shadow-[0_0_24px_oklch(0.72_0.15_220_/_0.3)] transition-all duration-200"
               >
                 {isAnalyzing ? (
                   <>
@@ -423,37 +418,49 @@ export default function Inspect() {
                   </>
                 ) : (
                   <>
-                    <ScanSearch className="size-4" />
+                    <Zap className="size-4" />
                     Analyze with AI
                   </>
                 )}
               </Button>
-              <Button variant="outline" onClick={handleClear}>
+              <Button
+                variant="outline"
+                onClick={handleClear}
+                className="border-border/60 bg-surface-2 hover:bg-surface-3"
+              >
                 Clear
               </Button>
             </div>
           </div>
 
           {/* Right: Results */}
-          <div className="space-y-6">
+          <div className="space-y-4 md:space-y-5">
             {!result && !isAnalyzing && (
-              <Card className="border-border/70">
-                <CardContent className="py-16 text-center">
-                  <ScanSearch className="size-10 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="font-semibold">No analysis results</h3>
-                  <p className="mt-2 text-sm text-muted-foreground max-w-sm mx-auto">
-                    Select an infrastructure type and upload an image, then click "Analyze with AI"
-                    to see defect detection and risk assessment results.
+              <Card className="bg-card border-border/60">
+                <CardContent className="py-16 md:py-24 text-center">
+                  <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-surface-3">
+                    <ImageIcon className="size-6 text-muted-foreground" />
+                  </div>
+                  <h3 className="font-semibold text-foreground">
+                    No analysis results
+                  </h3>
+                  <p className="mt-2 text-sm text-muted-foreground max-w-sm mx-auto leading-relaxed">
+                    Select an infrastructure type and click "Analyze with AI" to run the
+                    inspection pipeline.
                   </p>
                 </CardContent>
               </Card>
             )}
 
             {isAnalyzing && (
-              <Card className="border-border/70">
+              <Card className="bg-card border-border/60">
                 <CardContent className="py-16 text-center">
-                  <div className="size-10 border-3 border-slate-900 border-t-transparent rounded-full animate-spin mx-auto mb-4 dark:border-slate-100" />
-                  <h3 className="font-semibold">Analyzing image...</h3>
+                  <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary/10">
+                    <div className="size-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  </div>
+                  <h3 className="font-semibold text-foreground">
+                    Analyzing image...
+                  </h3>
                   <p className="mt-2 text-sm text-muted-foreground">
                     Running computer vision model and risk assessment pipeline
                   </p>
@@ -465,32 +472,41 @@ export default function Inspect() {
               <>
                 {/* Demo Warning */}
                 {isDemo && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="size-4 mt-0.5 text-amber-600 shrink-0" />
-                      <p className="text-sm text-amber-800 dark:text-amber-200">
-                        <strong>DEMO DATA</strong> — These are sample results for demonstration purposes,
-                        not real-time AI predictions.
+                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="size-4 mt-0.5 text-amber-400 shrink-0" />
+                      <p className="text-sm text-amber-200/90">
+                        <strong className="text-amber-300">DEMO DATA</strong> — Sample results for
+                        demonstration, not real-time AI predictions.
                       </p>
                     </div>
                   </div>
                 )}
 
-                {/* Analysis Status */}
-                <Card className="border-border/70">
+                {/* Analysis Status Bar */}
+                <Card className="bg-card border-border/60">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3">
                         {result.success ? (
-                          <CheckCircle2 className="size-5 text-emerald-500" />
+                          <div className="flex size-8 items-center justify-center rounded-lg bg-risk-low/10">
+                            <CheckCircle2 className="size-4 text-risk-low" />
+                          </div>
                         ) : (
-                          <XCircle className="size-5 text-red-500" />
+                          <div className="flex size-8 items-center justify-center rounded-lg bg-risk-critical/10">
+                            <XCircle className="size-4 text-risk-critical" />
+                          </div>
                         )}
-                        <span className="text-sm font-medium">
-                          {result.success ? "Analysis Complete" : "Analysis Failed"}
-                        </span>
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">
+                            {result.success ? "Analysis Complete" : "Analysis Failed"}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {result.defects.length} defect(s) detected
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Clock className="size-3" />
                         {result.processingTimeMs}ms
                       </div>
@@ -499,43 +515,48 @@ export default function Inspect() {
                 </Card>
 
                 {/* Defects */}
-                <Card className="border-border/70">
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium">
-                      Detected Defects ({result.defects.length})
+                <Card className="bg-card border-border/60">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-semibold text-foreground">
+                      Detected Defects
+                      <span className="ml-2 text-muted-foreground font-normal">
+                        ({result.defects.length})
+                      </span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     {result.defects.length === 0 ? (
-                      <p className="text-sm text-muted-foreground py-4 text-center">
+                      <p className="text-sm text-muted-foreground py-6 text-center">
                         No visible defects detected
                       </p>
                     ) : (
-                      <div className="space-y-3">
+                      <div className="space-y-2.5">
                         {result.defects.map((defect, i) => (
                           <div
                             key={i}
-                            className="rounded-lg border border-border p-4"
+                            className="rounded-xl border border-border/50 bg-surface-2 p-4"
                           >
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <p className="font-semibold text-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1">
+                                <p className="font-semibold text-sm text-foreground">
                                   {getDefectLabel(defect.defectType, infraType as InfraType)}
                                 </p>
-                                <p className="text-xs text-muted-foreground mt-0.5">
+                                <p className="text-[11px] text-muted-foreground mt-0.5">
                                   Confidence: {(defect.confidence * 100).toFixed(0)}%
                                 </p>
                               </div>
                               <Badge
                                 variant="outline"
-                                className={`text-xs ${getSeverityColor(defect.severity)}`}
+                                className={`text-[10px] font-semibold border-0 shrink-0 ${getSeverityColor(defect.severity)}`}
                               >
                                 {defect.severity.toUpperCase()}
                               </Badge>
                             </div>
                             {defect.bboxX !== undefined && (
-                              <div className="mt-2 text-xs text-muted-foreground">
-                                Bounding box: ({defect.bboxX}, {defect.bboxY}) → ({defect.bboxX! + defect.bboxWidth!}, {defect.bboxY! + defect.bboxHeight!})
+                              <div className="mt-2.5 pt-2.5 border-t border-border/30 text-[11px] text-muted-foreground font-mono">
+                                BBox: ({defect.bboxX}, {defect.bboxY}) → (
+                                {defect.bboxX! + defect.bboxWidth!},{" "}
+                                {defect.bboxY! + defect.bboxHeight!})
                               </div>
                             )}
                           </div>
@@ -546,53 +567,65 @@ export default function Inspect() {
                 </Card>
 
                 {/* Risk Assessment */}
-                <Card className="border-border/70">
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium">Risk Assessment</CardTitle>
+                <Card className="bg-card border-border/60">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                      <Shield className="size-4 text-primary" />
+                      Risk Assessment
+                    </CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="text-center p-4 rounded-lg bg-muted/50">
-                        <p className="text-3xl font-bold">{result.risk.riskScore}</p>
-                        <p className="text-xs text-muted-foreground mt-1">Risk Score</p>
+                  <CardContent className="space-y-5">
+                    {/* Big Score + Category + Priority */}
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="col-span-1 rounded-xl bg-surface-2 p-4 text-center border border-border/30">
+                        <p className="text-4xl font-bold tracking-tight text-foreground">
+                          {result.risk.riskScore}
+                        </p>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mt-1">
+                          Risk Score
+                        </p>
                       </div>
-                      <div className="text-center p-4 rounded-lg bg-muted/50">
+                      <div className="rounded-xl bg-surface-2 p-4 text-center border border-border/30 flex flex-col items-center justify-center">
                         <Badge
                           variant="outline"
-                          className={`text-sm ${getRiskColor(result.risk.riskCategory)}`}
+                          className={`text-sm font-bold border-0 ${getRiskColor(result.risk.riskCategory)}`}
                         >
                           {result.risk.riskCategory}
                         </Badge>
-                        <p className="text-xs text-muted-foreground mt-2">Category</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mt-2">
+                          Category
+                        </p>
                       </div>
-                      <div className="text-center p-4 rounded-lg bg-muted/50">
+                      <div className="rounded-xl bg-surface-2 p-4 text-center border border-border/30 flex flex-col items-center justify-center">
                         <Badge
                           variant="outline"
-                          className={`text-sm ${getPriorityColor(result.risk.priority)}`}
+                          className={`text-sm font-bold border-0 ${getPriorityColor(result.risk.priority)}`}
                         >
                           {result.risk.priority}
                         </Badge>
-                        <p className="text-xs text-muted-foreground mt-2">Priority</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mt-2">
+                          Priority
+                        </p>
                       </div>
                     </div>
 
-                    {/* Risk Score Bar */}
+                    {/* Score Bar */}
                     <div>
-                      <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                      <div className="flex justify-between text-[11px] text-muted-foreground mb-1.5">
                         <span>0</span>
-                        <span>Risk Score</span>
+                        <span className="font-medium">Risk Score</span>
                         <span>100</span>
                       </div>
-                      <div className="h-2.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-2.5 rounded-full bg-surface-3 overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all duration-700 ${
                             result.risk.riskScore >= 80
-                              ? "bg-red-500"
+                              ? "bg-risk-critical"
                               : result.risk.riskScore >= 55
-                              ? "bg-orange-500"
+                              ? "bg-risk-high"
                               : result.risk.riskScore >= 30
-                              ? "bg-amber-500"
-                              : "bg-emerald-500"
+                              ? "bg-risk-moderate"
+                              : "bg-risk-low"
                           }`}
                           style={{ width: `${result.risk.riskScore}%` }}
                         />
@@ -601,11 +634,11 @@ export default function Inspect() {
                   </CardContent>
                 </Card>
 
-                {/* Explanation */}
-                <Card className="border-border/70">
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium flex items-center gap-2">
-                      <FileText className="size-4" />
+                {/* AI Explanation */}
+                <Card className="bg-card border-border/60">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                      <FileText className="size-4 text-primary" />
                       AI Explanation
                     </CardTitle>
                   </CardHeader>
@@ -614,9 +647,12 @@ export default function Inspect() {
                       {result.risk.explanation}
                     </p>
 
-                    <div className="rounded-lg bg-muted/50 p-4">
-                      <p className="text-sm font-medium">Recommended Action</p>
-                      <p className="text-sm text-muted-foreground mt-1">
+                    {/* Recommended Action */}
+                    <div className="rounded-xl bg-primary/5 border border-primary/15 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-1.5">
+                        Recommended Action
+                      </p>
+                      <p className="text-sm text-foreground leading-relaxed">
                         {result.risk.recommendedAction}
                       </p>
                     </div>
@@ -626,7 +662,7 @@ export default function Inspect() {
                       <div>
                         <button
                           onClick={() => setFactorsExpanded(!factorsExpanded)}
-                          className="flex items-center gap-2 text-sm font-medium hover:text-foreground text-muted-foreground transition-colors"
+                          className="flex items-center gap-2 text-sm font-semibold text-foreground hover:text-primary transition-colors"
                         >
                           Why this risk?
                           {factorsExpanded ? (
@@ -640,15 +676,17 @@ export default function Inspect() {
                             {result.risk.factors.map((factor, i) => (
                               <div
                                 key={i}
-                                className="rounded-lg border border-border p-3"
+                                className="rounded-xl border border-border/50 bg-surface-2 p-3.5"
                               >
                                 <div className="flex items-center justify-between">
-                                  <p className="text-sm font-medium">{factor.name}</p>
-                                  <span className="text-xs text-muted-foreground">
+                                  <p className="text-sm font-medium text-foreground">
+                                    {factor.name}
+                                  </p>
+                                  <span className="text-[11px] font-semibold text-primary">
                                     +{factor.impact} pts
                                   </span>
                                 </div>
-                                <p className="text-xs text-muted-foreground mt-1">
+                                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                                   {factor.description}
                                 </p>
                               </div>
@@ -659,16 +697,18 @@ export default function Inspect() {
                     )}
 
                     {/* Disclaimer */}
-                    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
-                      <p className="text-xs text-amber-800 dark:text-amber-200">
-                        {result.risk.disclaimer}
-                      </p>
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="size-3.5 mt-0.5 text-amber-400 shrink-0" />
+                        <p className="text-xs text-amber-200/80 leading-relaxed">
+                          {result.risk.disclaimer}
+                        </p>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Model Note */}
-                <p className="text-xs text-muted-foreground italic">
+                <p className="text-[11px] text-muted-foreground/60 italic">
                   {result.modelNote}
                 </p>
               </>

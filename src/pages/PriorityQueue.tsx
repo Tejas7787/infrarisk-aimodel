@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { useAuth } from "@/hooks/use-auth";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -20,15 +18,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ListOrdered, Search } from "lucide-react";
 import {
-  ListOrdered,
-  Search,
-  Filter,
-  ExternalLink,
-} from "lucide-react";
-import { getRiskColor, getPriorityColor, getSeverityColor, getDefectLabel } from "@/lib/risk-engine";
+  getRiskColor,
+  getPriorityColor,
+  getSeverityColor,
+  getDefectLabel,
+} from "@/lib/risk-engine";
 import { DEMO_INSPECTIONS } from "@/lib/types";
-import type { InfraType, RiskCategory, Priority, SeverityLevel, MaintenanceStatus } from "@/lib/types";
+import type {
+  InfraType,
+  RiskCategory,
+  Priority,
+  SeverityLevel,
+} from "@/lib/types";
 
 interface QueueEntry {
   inspectionId: string;
@@ -36,23 +39,29 @@ interface QueueEntry {
   infraType: InfraType;
   location: string;
   createdAt: number;
-  detections: { defectType: string; confidence: number; severity: SeverityLevel }[];
+  detections: {
+    defectType: string;
+    confidence: number;
+    severity: SeverityLevel;
+  }[];
   riskScore: number;
   riskCategory: RiskCategory;
   priority: Priority;
 }
 
-const PRIORITY_ORDER: Record<string, number> = { P1: 0, P2: 1, P3: 2, P4: 3 };
+const PRIORITY_ORDER: Record<string, number> = {
+  P1: 0,
+  P2: 1,
+  P3: 2,
+  P4: 3,
+};
 
 export default function PriorityQueue() {
-  const { user } = useAuth();
   const [filterType, setFilterType] = useState<string>("all");
   const [filterRisk, setFilterRisk] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
   const [search, setSearch] = useState("");
 
-  // Use demo data
   const queue: QueueEntry[] = DEMO_INSPECTIONS.map((d) => ({
     inspectionId: d.inspectionId,
     assetId: d.assetId,
@@ -68,40 +77,56 @@ export default function PriorityQueue() {
   const filtered = queue
     .filter((q) => filterType === "all" || q.infraType === filterType)
     .filter((q) => filterRisk === "all" || q.riskCategory === filterRisk)
-    .filter((q) => filterPriority === "all" || q.priority === filterPriority)
+    .filter(
+      (q) => filterPriority === "all" || q.priority === filterPriority
+    )
     .filter(
       (q) =>
         search === "" ||
         q.assetId.toLowerCase().includes(search.toLowerCase()) ||
         q.location.toLowerCase().includes(search.toLowerCase())
     )
-    .sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 4) - (PRIORITY_ORDER[b.priority] ?? 4));
+    .sort(
+      (a, b) =>
+        (PRIORITY_ORDER[a.priority] ?? 4) - (PRIORITY_ORDER[b.priority] ?? 4)
+    );
 
   return (
     <AppShell>
-      <div className="p-6 lg:p-8 max-w-[1400px] mx-auto">
-        <header className="mb-6">
-          <p className="text-sm font-medium text-muted-foreground">Prioritization</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">Priority Queue</h1>
+      <div className="p-4 md:p-8 max-w-[1400px] mx-auto pb-24 md:pb-8">
+        <header className="mb-6 md:mb-8">
+          <div className="flex items-center gap-3 mb-1">
+            <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10">
+              <ListOrdered className="size-5 text-primary" />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+                Prioritization
+              </p>
+              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
+                Priority Queue
+              </h1>
+            </div>
+          </div>
         </header>
 
         {/* Filters */}
-        <Card className="border-border/70 mb-6">
-          <CardContent className="p-4">
-            <div className="flex flex-wrap gap-3 items-end">
-              <div className="flex-1 min-w-[200px]">
+        <Card className="bg-card border-border/60 mb-4 md:mb-6">
+          <CardContent className="p-3 md:p-4">
+            <div className="flex flex-wrap gap-2 md:gap-3 items-end">
+              <div className="flex-1 min-w-[180px]">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search by asset ID or location..."
+                    placeholder="Search assets or locations..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    className="pl-9"
+                    className="pl-9 bg-surface-2 border-border/60 text-sm"
                   />
                 </div>
               </div>
               <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-[150px]">
+                <SelectTrigger className="w-[130px] bg-surface-2 border-border/60 text-sm">
                   <SelectValue placeholder="Type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -114,7 +139,7 @@ export default function PriorityQueue() {
                 </SelectContent>
               </Select>
               <Select value={filterRisk} onValueChange={setFilterRisk}>
-                <SelectTrigger className="w-[150px]">
+                <SelectTrigger className="w-[130px] bg-surface-2 border-border/60 text-sm">
                   <SelectValue placeholder="Risk" />
                 </SelectTrigger>
                 <SelectContent>
@@ -126,7 +151,7 @@ export default function PriorityQueue() {
                 </SelectContent>
               </Select>
               <Select value={filterPriority} onValueChange={setFilterPriority}>
-                <SelectTrigger className="w-[150px]">
+                <SelectTrigger className="w-[130px] bg-surface-2 border-border/60 text-sm">
                   <SelectValue placeholder="Priority" />
                 </SelectTrigger>
                 <SelectContent>
@@ -142,99 +167,135 @@ export default function PriorityQueue() {
         </Card>
 
         {/* Demo Badge */}
-        <div className="mb-4">
-          <Badge variant="outline" className="text-amber-600 border-amber-200">
+        <div className="mb-3">
+          <Badge variant="outline" className="text-[11px] bg-amber-500/10 text-amber-400 border-amber-500/20">
             DEMO DATA — Sample priority queue
           </Badge>
         </div>
 
         {/* Table */}
-        <Card className="border-border/70">
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
+        <Card className="bg-card border-border/60 overflow-hidden">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-border/60 hover:bg-transparent">
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Asset
+                  </TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Type
+                  </TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hidden md:table-cell">
+                    Location
+                  </TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Defect
+                  </TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Severity
+                  </TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Risk
+                  </TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Priority
+                  </TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hidden lg:table-cell">
+                    Date
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.length === 0 ? (
                   <TableRow>
-                    <TableHead>Asset</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>Defect</TableHead>
-                    <TableHead>Severity</TableHead>
-                    <TableHead>Risk</TableHead>
-                    <TableHead>Priority</TableHead>
-                    <TableHead>Date</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center py-12">
-                        <ListOrdered className="size-8 text-muted-foreground mx-auto mb-3" />
-                        <p className="text-sm font-medium">No items match filters</p>
+                    <TableCell colSpan={8} className="text-center py-16">
+                      <div className="flex flex-col items-center">
+                        <div className="flex size-12 items-center justify-center rounded-2xl bg-surface-3 mb-3">
+                          <ListOrdered className="size-5 text-muted-foreground" />
+                        </div>
+                        <p className="text-sm font-medium text-foreground">
+                          No items match filters
+                        </p>
                         <p className="text-xs text-muted-foreground mt-1">
                           Try adjusting your search or filters
                         </p>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filtered.map((item) => {
-                      const topDefect = item.detections[0];
-                      return (
-                        <TableRow key={item.inspectionId}>
-                          <TableCell>
-                            <p className="font-medium text-sm">{item.assetId}</p>
-                          </TableCell>
-                          <TableCell>
-                            <span className="capitalize text-sm">{item.infraType}</span>
-                          </TableCell>
-                          <TableCell>
-                            <p className="text-sm text-muted-foreground max-w-[200px] truncate">
-                              {item.location}
-                            </p>
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-sm">
-                              {topDefect
-                                ? getDefectLabel(topDefect.defectType, item.infraType)
-                                : "N/A"}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            {topDefect ? (
-                              <Badge
-                                variant="outline"
-                                className={`text-xs ${getSeverityColor(topDefect.severity)}`}
-                              >
-                                {topDefect.severity}
-                              </Badge>
-                            ) : (
-                              "—"
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-sm font-semibold">{item.riskScore}</span>
-                          </TableCell>
-                          <TableCell>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filtered.map((item) => {
+                    const topDefect = item.detections[0];
+                    return (
+                      <TableRow
+                        key={item.inspectionId}
+                        className="border-border/40 hover:bg-surface-2/50"
+                      >
+                        <TableCell>
+                          <p className="font-semibold text-sm text-foreground">
+                            {item.assetId}
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm text-muted-foreground capitalize">
+                            {item.infraType}
+                          </span>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <p className="text-sm text-muted-foreground max-w-[180px] truncate">
+                            {item.location}
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm text-foreground">
+                            {topDefect
+                              ? getDefectLabel(
+                                  topDefect.defectType,
+                                  item.infraType
+                                )
+                              : "N/A"}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {topDefect ? (
                             <Badge
                               variant="outline"
-                              className={`text-xs ${getPriorityColor(item.priority)}`}
+                              className={`text-[10px] font-semibold border-0 ${getSeverityColor(
+                                topDefect.severity
+                              )}`}
                             >
-                              {item.priority}
+                              {topDefect.severity}
                             </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(item.createdAt).toLocaleDateString()}
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm font-bold text-foreground">
+                            {item.riskScore}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] font-bold border-0 ${getPriorityColor(
+                              item.priority
+                            )}`}
+                          >
+                            {item.priority}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(item.createdAt).toLocaleDateString()}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </Card>
       </div>
     </AppShell>
