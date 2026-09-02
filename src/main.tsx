@@ -8,13 +8,19 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 
-// Lazy load route components for better code splitting
+// Lazy load route components
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
+const Inspect = lazy(() => import("./pages/Inspect.tsx"));
+const PriorityQueue = lazy(() => import("./pages/PriorityQueue.tsx"));
+const Assets = lazy(() => import("./pages/Assets.tsx"));
+const MapPage = lazy(() => import("./pages/MapPage.tsx"));
+const Reports = lazy(() => import("./pages/Reports.tsx"));
+const Architecture = lazy(() => import("./pages/Architecture.tsx"));
+const ResponsibleAI = lazy(() => import("./pages/ResponsibleAI.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
-// Simple loading fallback for route transitions
 function RouteLoading() {
   return (
     <div className="min-h-screen flex items-center justify-center">
@@ -23,8 +29,6 @@ function RouteLoading() {
   );
 }
 
-/** Silent error boundary — if VlyToolbar crashes it renders nothing instead of
- *  crashing the whole app (e.g. hook errors in WebContainer environment). */
 class ToolbarErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean }
@@ -41,7 +45,6 @@ class ToolbarErrorBoundary extends React.Component<
   }
 }
 
-/** Hard guard so runtime errors never leave the preview as a blank page. */
 class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean; message: string; stack: string }
@@ -79,16 +82,16 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
-
-
+const convex = new ConvexReactClient(
+  import.meta.env.VITE_CONVEX_URL as string
+);
 
 function RouteSyncer() {
   const location = useLocation();
   useEffect(() => {
     window.parent.postMessage(
       { type: "iframe-route-change", path: location.pathname },
-      "*",
+      "*"
     );
   }, [location.pathname]);
 
@@ -105,7 +108,6 @@ function RouteSyncer() {
 
   return null;
 }
-
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -131,6 +133,62 @@ createRoot(document.getElementById("root")!).render(
                   </RequireAuth>
                 }
               />
+              <Route
+                path="/inspect"
+                element={
+                  <RequireAuth>
+                    <Inspect />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/priority-queue"
+                element={
+                  <RequireAuth>
+                    <PriorityQueue />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/assets"
+                element={
+                  <RequireAuth>
+                    <Assets />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/map"
+                element={
+                  <RequireAuth>
+                    <MapPage />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/reports"
+                element={
+                  <RequireAuth>
+                    <Reports />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/architecture"
+                element={
+                  <RequireAuth>
+                    <Architecture />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/responsible-ai"
+                element={
+                  <RequireAuth>
+                    <ResponsibleAI />
+                  </RequireAuth>
+                }
+              />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
@@ -138,5 +196,5 @@ createRoot(document.getElementById("root")!).render(
         <Toaster />
       </ConvexAuthProvider>
     </RootErrorBoundary>
-  </StrictMode>,
+  </StrictMode>
 );
