@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { useAuth } from "@/hooks/use-auth";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,70 +28,66 @@ import {
   getSeverityColor,
   getDefectLabel,
 } from "@/lib/risk-engine";
-import { DEMO_INSPECTIONS } from "@/lib/types";
-import type {
-  InfraType,
-  RiskCategory,
-  Priority,
-  SeverityLevel,
-} from "@/lib/types";
-
-interface QueueEntry {
-  inspectionId: string;
-  assetId: string;
-  infraType: InfraType;
-  location: string;
-  createdAt: number;
-  detections: {
-    defectType: string;
-    confidence: number;
-    severity: SeverityLevel;
-  }[];
-  riskScore: number;
-  riskCategory: RiskCategory;
-  priority: Priority;
-}
-
-const PRIORITY_ORDER: Record<string, number> = {
-  P1: 0,
-  P2: 1,
-  P3: 2,
-  P4: 3,
-};
 
 export default function PriorityQueue() {
+  const { user } = useAuth();
+  const queueData = useQuery(
+    api.stats.getPriorityQueue,
+    user?._id ? { userId: user._id } : "skip"
+  );
+
   const [filterType, setFilterType] = useState<string>("all");
   const [filterRisk, setFilterRisk] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [search, setSearch] = useState("");
 
-  const queue: QueueEntry[] = DEMO_INSPECTIONS.map((d) => ({
-    inspectionId: d.inspectionId,
-    assetId: d.assetId,
-    infraType: d.infraType,
-    location: d.location,
-    createdAt: d.createdAt,
-    detections: d.detections,
-    riskScore: d.riskScore,
-    riskCategory: d.riskCategory,
-    priority: d.priority,
-  }));
+  const PRIORITY_ORDER: Record<string, number> = {
+    P1: 0,
+    P2: 1,
+    P3: 2,
+    P4: 3,
+  };
 
-  const filtered = queue
-    .filter((q) => filterType === "all" || q.infraType === filterType)
-    .filter((q) => filterRisk === "all" || q.riskCategory === filterRisk)
+  if (!queueData) {
+    return (
+      <AppShell>
+        <div className="p-4 md:p-8 max-w-[1400px] mx-auto pb-24 md:pb-8">
+          <header className="mb-6 md:mb-8">
+            <div className="flex items-center gap-3 mb-1">
+              <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10">
+                <ListOrdered className="size-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+                  Prioritization
+                </p>
+                <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
+                  Priority Queue
+                </h1>
+              </div>
+            </div>
+          </header>
+          <div className="space-y-4">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-16 rounded-xl bg-surface-2 animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const filtered = queueData
+    .filter((q) => filterType === "all" || q.asset?.infraType === filterType)
+    .filter((q) => filterRisk === "all" || q.riskAssessment.riskCategory === filterRisk)
     .filter(
-      (q) => filterPriority === "all" || q.priority === filterPriority
+      (q) => filterPriority === "all" || q.riskAssessment.priority === filterPriority
     )
     .filter(
       (q) =>
         search === "" ||
-        q.assetId.toLowerCase().includes(search.toLowerCase()) ||
-        q.location.toLowerCase().includes(search.toLowerCase())
-    )
-    .sort(
-      (a, b) =>
-        (PRIORITY_ORDER[a.priority] ?? 4) - (PRIORITY_ORDER[b.priority] ?? 4)
+        q.asset?.assetId?.toLowerCase().includes(search.toLowerCase()) ||
+        q.asset?.location?.toLowerCase().includes(search.toLowerCase())
     );
 
   return (
@@ -166,13 +165,6 @@ export default function PriorityQueue() {
           </CardContent>
         </Card>
 
-        {/* Demo Badge */}
-        <div className="mb-3">
-          <Badge variant="outline" className="text-[11px] bg-amber-500/10 text-amber-400 border-amber-500/20">
-            DEMO DATA — Sample priority queue
-          </Badge>
-        </div>
-
         {/* Table */}
         <Card className="bg-card border-border/60 overflow-hidden">
           <div className="overflow-x-auto">
@@ -214,84 +206,85 @@ export default function PriorityQueue() {
                           <ListOrdered className="size-5 text-muted-foreground" />
                         </div>
                         <p className="text-sm font-medium text-foreground">
-                          No items match filters
+                          {queueData.length === 0
+                            ? "No inspections yet"
+                            : "No items match filters"}
                         </p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          Try adjusting your search or filters
+                          {queueData.length === 0
+                            ? "Run an inspection on the AI Inspection page to populate the queue"
+                            : "Try adjusting your search or filters"}
                         </p>
                       </div>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((item) => {
-                    const topDefect = item.detections[0];
-                    return (
-                      <TableRow
-                        key={item.inspectionId}
-                        className="border-border/40 hover:bg-surface-2/50"
-                      >
-                        <TableCell>
-                          <p className="font-semibold text-sm text-foreground">
-                            {item.assetId}
-                          </p>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-muted-foreground capitalize">
-                            {item.infraType}
-                          </span>
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell">
-                          <p className="text-sm text-muted-foreground max-w-[180px] truncate">
-                            {item.location}
-                          </p>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-foreground">
-                            {topDefect
-                              ? getDefectLabel(
-                                  topDefect.defectType,
-                                  item.infraType
-                                )
-                              : "N/A"}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          {topDefect ? (
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] font-semibold border-0 ${getSeverityColor(
-                                topDefect.severity
-                              )}`}
-                            >
-                              {topDefect.severity}
-                            </Badge>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm font-bold text-foreground">
-                            {item.riskScore}
-                          </span>
-                        </TableCell>
-                        <TableCell>
+                  filtered.map((item) => (
+                    <TableRow
+                      key={item.riskAssessment._id}
+                      className="border-border/40 hover:bg-surface-2/50"
+                    >
+                      <TableCell>
+                        <p className="font-semibold text-sm text-foreground">
+                          {item.asset?.assetId ?? "Unknown"}
+                        </p>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-muted-foreground capitalize">
+                          {item.asset?.infraType ?? "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <p className="text-sm text-muted-foreground max-w-[180px] truncate">
+                          {item.asset?.location ?? "—"}
+                        </p>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-foreground">
+                          {item.topDefect !== "N/A"
+                            ? getDefectLabel(
+                                item.topDefect,
+                                (item.asset?.infraType as "road" | "bridge" | "tunnel" | "water" | "power") ?? "road"
+                              )
+                            : "N/A"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {item.topSeverity !== "N/A" ? (
                           <Badge
                             variant="outline"
-                            className={`text-[10px] font-bold border-0 ${getPriorityColor(
-                              item.priority
+                            className={`text-[10px] font-semibold border-0 ${getSeverityColor(
+                              item.topSeverity as "low" | "medium" | "high" | "critical"
                             )}`}
                           >
-                            {item.priority}
+                            {item.topSeverity}
                           </Badge>
-                        </TableCell>
-                        <TableCell className="hidden lg:table-cell">
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(item.createdAt).toLocaleDateString()}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm font-bold text-foreground">
+                          {item.riskAssessment.riskScore}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] font-bold border-0 ${getPriorityColor(
+                            item.riskAssessment.priority as "P1" | "P2" | "P3" | "P4"
+                          )}`}
+                        >
+                          {item.riskAssessment.priority}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(item.riskAssessment.createdAt).toLocaleDateString()}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))
                 )}
               </TableBody>
             </Table>

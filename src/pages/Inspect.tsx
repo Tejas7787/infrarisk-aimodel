@@ -1,4 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { useAuth } from "@/hooks/use-auth";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,8 +30,8 @@ import {
   Shield,
   ImageIcon,
   Plug,
-  ExternalLink,
   Loader2,
+  Save,
 } from "lucide-react";
 import {
   getDefectLabel,
@@ -43,8 +46,20 @@ import {
 import { getModelStatus } from "@/lib/yolo-inference";
 import type { InfraType } from "@/lib/types";
 
+type SaveStatus = "idle" | "saving" | "saved" | "save_failed";
+
 export default function Inspect() {
+  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Convex mutations
+  const generateUploadUrl = useMutation(api.upload.generateUploadUrl);
+  const createAsset = useMutation(api.assets.create);
+  const createInspection = useMutation(api.inspections.create);
+  const completeInspection = useMutation(api.inspections.complete);
+  const failInspection = useMutation(api.inspections.fail);
+  const createDetection = useMutation(api.inspections.createDetection);
+  const createRiskAssessment = useMutation(api.inspections.createRiskAssessment);
 
   const [infraType, setInfraType] = useState<InfraType | "">("");
   const [assetId, setAssetId] = useState("");
@@ -55,6 +70,8 @@ export default function Inspect() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [factorsExpanded, setFactorsExpanded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [savedInspectionId, setSavedInspectionId] = useState<string | null>(null);
 
   // Model status
   const [modelStatus, setModelStatus] = useState<{
@@ -73,22 +90,108 @@ export default function Inspect() {
       if (!file) return;
       setSelectedFile(file);
       setResult(null);
+      setSaveStatus("idle");
+      setSavedInspectionId(null);
       const url = URL.createObjectURL(file);
       setPreviewUrl(url);
     },
     []
   );
 
+  // Save the complete inspection pipeline to Convex
+  const saveToConvex = async (analysisResult: AnalysisResult) => {
+    if (!user?._id || !selectedFile || !infraType) return;
+
+    setSaveStatus("saving");
+
+    try {
+      // 1. Upload image to Convex storage
+      const uploadUrl = await generateUploadUrl();
+      const uploadResponse = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": selectedFile.type },
+        body: selectedFile,
+      });
+      const { storageId } = await uploadResponse.json();
+
+      // 2. Create or find asset
+      const assetRecordId = await createAsset({
+        userId: user._id,
+        assetId: assetId || `AUTO-${Date.now()}`,
+        infraType,
+        location: location || undefined,
+        notes: notes || undefined,
+        status: "inspection_required",
+      });
+
+      // 3. Create inspection record
+      const inspectionId = await createInspection({
+        userId: user._id,
+        assetId: assetRecordId,
+        imageId: storageId,
+        infraType,
+        location: location || undefined,
+        notes: notes || undefined,
+      });
+
+      // 4. Save each detection
+      for (const defect of analysisResult.defects) {
+        await createDetection({
+          inspectionId,
+          userId: user._id,
+          defectType: defect.defectType,
+          confidence: defect.confidence,
+          severity: defect.severity,
+          bboxX: defect.bboxX,
+          bboxY: defect.bboxY,
+          bboxWidth: defect.bboxWidth,
+          bboxHeight: defect.bboxHeight,
+          description: defect.description,
+        });
+      }
+
+      // 5. Save risk assessment
+      await createRiskAssessment({
+        inspectionId,
+        userId: user._id,
+        assetId: assetRecordId,
+        riskScore: analysisResult.risk.riskScore,
+        riskCategory: analysisResult.risk.riskCategory,
+        priority: analysisResult.risk.priority,
+        explanation: analysisResult.risk.explanation,
+        factors: analysisResult.risk.factors,
+        recommendedAction: analysisResult.risk.recommendedAction,
+        disclaimer: analysisResult.risk.disclaimer,
+      });
+
+      // 6. Mark inspection as completed (or failed if no model)
+      if (analysisResult.modelConnected) {
+        await completeInspection({ id: inspectionId });
+      } else {
+        await failInspection({
+          id: inspectionId,
+          reason: analysisResult.modelNote,
+        });
+      }
+
+      setSavedInspectionId(inspectionId);
+      setSaveStatus("saved");
+    } catch (error) {
+      console.error("Failed to save inspection to Convex:", error);
+      setSaveStatus("save_failed");
+    }
+  };
+
   const handleAnalyze = async () => {
     if (!infraType || !selectedFile) return;
 
     setIsAnalyzing(true);
     setResult(null);
+    setSaveStatus("idle");
+    setSavedInspectionId(null);
 
     try {
-      // Convert file to data URL for inference
       const imageData = await fileToDataUrl(selectedFile);
-
       const analysisResult = await analyzeInfrastructure(
         infraType as InfraType,
         imageData,
@@ -96,8 +199,12 @@ export default function Inspect() {
       );
 
       setResult(analysisResult);
+
+      // Save to Convex
+      if (user?._id) {
+        await saveToConvex(analysisResult);
+      }
     } catch (err) {
-      // Should not reach here, but handle gracefully
       setResult({
         success: false,
         defects: [],
@@ -132,6 +239,8 @@ export default function Inspect() {
     setSelectedFile(null);
     setResult(null);
     setFactorsExpanded(false);
+    setSaveStatus("idle");
+    setSavedInspectionId(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -323,6 +432,8 @@ export default function Inspect() {
                           setPreviewUrl(null);
                           setSelectedFile(null);
                           setResult(null);
+                          setSaveStatus("idle");
+                          setSavedInspectionId(null);
                           if (fileInputRef.current)
                             fileInputRef.current.value = "";
                         }}
@@ -491,9 +602,30 @@ export default function Inspect() {
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Clock className="size-3" />
-                        {result.processingTimeMs}ms
+                      <div className="flex items-center gap-3">
+                        {/* Save status indicator */}
+                        {saveStatus === "saving" && (
+                          <div className="flex items-center gap-1.5 text-xs text-primary">
+                            <Loader2 className="size-3 animate-spin" />
+                            Saving...
+                          </div>
+                        )}
+                        {saveStatus === "saved" && (
+                          <div className="flex items-center gap-1.5 text-xs text-risk-low">
+                            <Save className="size-3" />
+                            Saved to database
+                          </div>
+                        )}
+                        {saveStatus === "save_failed" && (
+                          <div className="flex items-center gap-1.5 text-xs text-risk-critical">
+                            <XCircle className="size-3" />
+                            Save failed
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Clock className="size-3" />
+                          {result.processingTimeMs}ms
+                        </div>
                       </div>
                     </div>
 

@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { useAuth } from "@/hooks/use-auth";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,8 +11,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  DEMO_ASSETS,
-  DEMO_INSPECTIONS,
   INFRA_TYPE_INFO,
   type InfraType,
   type RiskCategory,
@@ -17,7 +18,14 @@ import {
 } from "@/lib/types";
 import { getRiskColor, getPriorityColor, getDefectLabel } from "@/lib/risk-engine";
 
-interface MapAsset {
+const RISK_MARKER_COLORS: Record<string, { fill: string; glow: string }> = {
+  LOW: { fill: "#22c55e", glow: "rgba(34,197,94,0.4)" },
+  MODERATE: { fill: "#f59e0b", glow: "rgba(245,158,11,0.4)" },
+  HIGH: { fill: "#f97316", glow: "rgba(249,115,22,0.4)" },
+  CRITICAL: { fill: "#ef4444", glow: "rgba(239,68,68,0.5)" },
+};
+
+interface MapAssetData {
   assetId: string;
   infraType: InfraType;
   location: string;
@@ -27,39 +35,64 @@ interface MapAsset {
   riskCategory: RiskCategory;
   priority: Priority;
   riskScore: number;
-  inspections: typeof DEMO_INSPECTIONS;
+  assetDocId: string;
 }
 
-const mapAssets: MapAsset[] = DEMO_ASSETS.filter(
-  (a) => a.latitude && a.longitude
-).map((a) => {
-  const inspections = DEMO_INSPECTIONS.filter((i) => i.assetId === a.assetId);
-  const latestRisk = inspections[0];
-  return {
-    ...a,
-    latitude: a.latitude!,
-    longitude: a.longitude!,
-    riskCategory: latestRisk?.riskCategory ?? "LOW",
-    priority: latestRisk?.priority ?? "P4",
-    riskScore: latestRisk?.riskScore ?? 0,
-    inspections,
-  };
-});
-
-const RISK_MARKER_COLORS: Record<string, { fill: string; glow: string }> = {
-  LOW: { fill: "#22c55e", glow: "rgba(34,197,94,0.4)" },
-  MODERATE: { fill: "#f59e0b", glow: "rgba(245,158,11,0.4)" },
-  HIGH: { fill: "#f97316", glow: "rgba(249,115,22,0.4)" },
-  CRITICAL: { fill: "#ef4444", glow: "rgba(239,68,68,0.5)" },
-};
-
 export default function MapPage() {
-  const [selected, setSelected] = useState<MapAsset | null>(null);
+  const { user } = useAuth();
+  const [selected, setSelected] = useState<MapAssetData | null>(null);
 
-  const minLat = Math.min(...mapAssets.map((a) => a.latitude));
-  const maxLat = Math.max(...mapAssets.map((a) => a.latitude));
-  const minLng = Math.min(...mapAssets.map((a) => a.longitude));
-  const maxLng = Math.max(...mapAssets.map((a) => a.longitude));
+  const assets = useQuery(
+    api.assets.list,
+    user?._id ? { userId: user._id } : "skip"
+  );
+  const riskAssessments = useQuery(
+    api.inspections.listRiskByUser,
+    user?._id ? { userId: user._id } : "skip"
+  );
+
+  const isLoading = assets === undefined || riskAssessments === undefined;
+
+  // Build map assets from real data
+  const mapAssets: MapAssetData[] = (assets ?? [])
+    .filter((a) => a.latitude != null && a.longitude != null)
+    .map((asset) => {
+      const latestRisk = (riskAssessments ?? [])
+        .filter((r) => r.assetId === asset._id)
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+      return {
+        assetId: asset.assetId,
+        infraType: asset.infraType as InfraType,
+        location: asset.location ?? "",
+        latitude: asset.latitude!,
+        longitude: asset.longitude!,
+        status: asset.status,
+        riskCategory: (latestRisk?.riskCategory as RiskCategory) ?? "LOW",
+        priority: (latestRisk?.priority as Priority) ?? "P4",
+        riskScore: latestRisk?.riskScore ?? 0,
+        assetDocId: asset._id,
+      };
+    });
+
+  // Only show assets with coordinates
+  const geoAssets = mapAssets.filter(
+    (a) => a.latitude != null && a.longitude != null
+  );
+
+  const hasData = geoAssets.length > 0;
+
+  const minLat = hasData
+    ? Math.min(...geoAssets.map((a) => a.latitude))
+    : 37.77;
+  const maxLat = hasData
+    ? Math.max(...geoAssets.map((a) => a.latitude))
+    : 37.82;
+  const minLng = hasData
+    ? Math.min(...geoAssets.map((a) => a.longitude))
+    : -122.48;
+  const maxLng = hasData
+    ? Math.max(...geoAssets.map((a) => a.longitude))
+    : -122.37;
   const padding = 80;
 
   const project = (lat: number, lng: number) => {
@@ -71,6 +104,11 @@ export default function MapPage() {
       ((maxLat - lat) / (maxLat - minLat || 1)) * (400 - 2 * padding);
     return { x, y };
   };
+
+  // Find inspections for selected asset
+  const selectedInspections = selected
+    ? (riskAssessments ?? []).filter((r) => r.assetId === selected.assetDocId)
+    : [];
 
   return (
     <AppShell>
@@ -89,9 +127,11 @@ export default function MapPage() {
               </h1>
             </div>
           </div>
-          <Badge variant="outline" className="text-[11px] bg-amber-500/10 text-amber-400 border-amber-500/20">
-            DEMO DATA
-          </Badge>
+          {!isLoading && !hasData && (
+            <Badge variant="outline" className="text-[11px] bg-primary/10 text-primary border-primary/20">
+              NO DATA — Add assets with coordinates on the Inspection page
+            </Badge>
+          )}
         </header>
 
         <div className="grid gap-4 md:gap-5 xl:grid-cols-[1fr_360px]">
@@ -132,7 +172,7 @@ export default function MapPage() {
                 </svg>
 
                 {/* Asset markers */}
-                {mapAssets.map((asset) => {
+                {geoAssets.map((asset) => {
                   const { x, y } = project(asset.latitude, asset.longitude);
                   const colors =
                     RISK_MARKER_COLORS[asset.riskCategory] ??
@@ -164,6 +204,23 @@ export default function MapPage() {
                     </button>
                   );
                 })}
+
+                {/* Empty state on map */}
+                {!isLoading && !hasData && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="flex size-14 items-center justify-center rounded-2xl bg-surface-3/50 mx-auto mb-3">
+                        <MapPin className="size-6 text-muted-foreground" />
+                      </div>
+                      <p className="text-sm font-medium text-muted-foreground">
+                        No assets with coordinates
+                      </p>
+                      <p className="text-xs text-muted-foreground/60 mt-1">
+                        Add latitude/longitude to assets to see them on the map
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Legend */}
                 <div className="absolute bottom-3 left-3 bg-[oklch(0.17_0.012_260)]/95 backdrop-blur-sm rounded-xl border border-border/40 p-3">
@@ -222,7 +279,7 @@ export default function MapPage() {
                   <CardContent className="space-y-3">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <MapPin className="size-3.5" />
-                      {selected.location}
+                      {selected.location || "No location specified"}
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
@@ -260,43 +317,38 @@ export default function MapPage() {
                   </CardContent>
                 </Card>
 
-                {/* Recent Inspections */}
-                {selected.inspections.length > 0 && (
+                {/* Risk Assessments for this asset */}
+                {selectedInspections.length > 0 && (
                   <Card className="bg-card border-border/60">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-semibold text-foreground">
-                        Recent Inspections
+                        Risk Assessments
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-2">
-                        {selected.inspections.slice(0, 3).map((insp) => (
+                        {selectedInspections.slice(0, 3).map((risk) => (
                           <div
-                            key={insp.inspectionId}
+                            key={risk._id}
                             className="rounded-xl border border-border/40 bg-surface-2 p-3"
                           >
                             <div className="flex items-center justify-between">
                               <span className="text-[11px] text-muted-foreground">
-                                {new Date(insp.createdAt).toLocaleDateString()}
+                                {new Date(risk.createdAt).toLocaleDateString()}
                               </span>
                               <Badge
                                 variant="outline"
                                 className={`text-[10px] border-0 ${getPriorityColor(
-                                  insp.priority
+                                  risk.priority as "P1" | "P2" | "P3" | "P4"
                                 )}`}
                               >
-                                {insp.priority}
+                                {risk.priority}
                               </Badge>
                             </div>
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {insp.detections.map((d, i) => (
-                                <span
-                                  key={i}
-                                  className="text-[10px] bg-surface-3 text-muted-foreground rounded-md px-2 py-0.5"
-                                >
-                                  {getDefectLabel(d.defectType, insp.infraType)}
-                                </span>
-                              ))}
+                            <div className="mt-2">
+                              <p className="text-xs text-muted-foreground line-clamp-2">
+                                {risk.explanation}
+                              </p>
                             </div>
                           </div>
                         ))}
