@@ -4,15 +4,23 @@
  * Runs a YOLOv8 ONNX model in the browser via ONNX Runtime Web (WASM backend).
  * Targets the RDD2022 road-damage dataset class labels.
  *
+ * Model loading strategy:
+ *   1. Remote: HuggingFace CDN (CORS: access-control-allow-origin: *)
+ *   2. Fallback: local /models/road-yolov8.onnx
+ *
+ * The HuggingFace CDN at us.gcp.cdn.hf.co serves ONNX files with full CORS,
+ * so ONNX Runtime Web can fetch them directly from the browser.
+ *
+ * To use a remote model:
+ *   1. Upload your trained ONNX to a HuggingFace repo
+ *   2. Set the MODEL_HF_REPO below to your repo ID
+ *   3. The file will be loaded from:
+ *      https://huggingface.co/{repo}/resolve/main/{filename}
+ *
  * Model requirements:
  *   - Format: YOLOv8 ONNX export (opset 12+, dynamic or fixed input)
  *   - Input: float32 NCHW tensor, normalized to [0,1], resized to MODEL_SIZE
  *   - Output: float32 tensor of shape [1, num_classes + 4, num_detections]
- *
- * To connect a real model:
- *   1. Train YOLOv8n on the RDD2022 dataset (4 classes)
- *   2. Export: yolo export model=best.pt format=onnx opset=12 imgsz=640
- *   3. Place the .onnx file in public/models/road-yolov8.onnx
  */
 
 import * as ort from "onnxruntime-web";
@@ -51,7 +59,14 @@ const MODEL_SIZE = 640; // YOLOv8 default input size
 const CONFIDENCE_THRESHOLD = 0.25;
 const IOU_THRESHOLD = 0.45;
 
-const MODEL_URL = "/models/road-yolov8.onnx";
+// Remote model source: HuggingFace repo + filename
+// Update these to point to your uploaded ONNX model
+const MODEL_HF_REPO = "InfrRiskAI/road-yolov8-rdd2022";
+const MODEL_HF_FILENAME = "road-yolov8.onnx";
+const REMOTE_MODEL_URL = `https://huggingface.co/${MODEL_HF_REPO}/resolve/main/${MODEL_HF_FILENAME}`;
+
+// Local fallback
+const LOCAL_MODEL_URL = "/models/road-yolov8.onnx";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,28 +78,49 @@ export interface RawDetection {
   bbox: { x: number; y: number; width: number; height: number }; // pixels in original image
 }
 
+export type ModelLoadSource = "remote" | "local" | "none";
+
 // ---------------------------------------------------------------------------
 // Model singleton
 // ---------------------------------------------------------------------------
 let sessionPromise: Promise<ort.InferenceSession> | null = null;
+let loadedSource: ModelLoadSource = "none";
+
+async function fetchModelBytes(): Promise<{ bytes: ArrayBuffer; source: ModelLoadSource }> {
+  // Try remote HuggingFace CDN first (CORS: access-control-allow-origin: *)
+  try {
+    const remoteResp = await fetch(REMOTE_MODEL_URL, { method: "HEAD" });
+    if (remoteResp.ok) {
+      const bytes = await fetch(REMOTE_MODEL_URL).then((r) => r.arrayBuffer());
+      return { bytes, source: "remote" };
+    }
+  } catch {
+    // CORS or network failure — fall through to local
+  }
+
+  // Fallback: local file in public/models/
+  try {
+    const localResp = await fetch(LOCAL_MODEL_URL, { method: "HEAD" });
+    if (localResp.ok) {
+      const bytes = await fetch(LOCAL_MODEL_URL).then((r) => r.arrayBuffer());
+      return { bytes, source: "local" };
+    }
+  } catch {
+    // File not found locally
+  }
+
+  throw new Error("MODEL_NOT_CONNECTED");
+}
 
 async function getModelSession(): Promise<ort.InferenceSession> {
   if (!sessionPromise) {
     sessionPromise = (async () => {
-      // Check if model file exists
-      const resp = await fetch(MODEL_URL, { method: "HEAD" });
-      if (!resp.ok) {
-        throw new Error(
-          `MODEL_NOT_FOUND: ${MODEL_URL} — ` +
-            `Place your YOLOv8 ONNX model trained on RDD2022 at this path. ` +
-            `Export with: yolo export model=best.pt format=onnx opset=12 imgsz=640`
-        );
-      }
+      const { bytes, source } = await fetchModelBytes();
+      loadedSource = source;
 
       ort.env.wasm.numThreads = navigator.hardwareConcurrency || 4;
 
-      const modelBytes = await fetch(MODEL_URL).then((r) => r.arrayBuffer());
-      const session = await ort.InferenceSession.create(modelBytes, {
+      const session = await ort.InferenceSession.create(bytes, {
         executionProviders: ["wasm"],
         graphOptimizationLevel: "all",
       });
@@ -95,6 +131,7 @@ async function getModelSession(): Promise<ort.InferenceSession> {
     // Reset on failure so next attempt retries
     sessionPromise.catch(() => {
       sessionPromise = null;
+      loadedSource = "none";
     });
   }
   return sessionPromise;
@@ -134,7 +171,7 @@ function preprocessImage(
   const imageData = ctx.getImageData(0, 0, targetSize, targetSize);
   const pixels = imageData.data;
 
-  // HWC -> CHW, normalize to [0,1], BGR -> RGB
+  // HWC -> CHW, normalize to [0,1]
   const chw = new Float32Array(3 * targetSize * targetSize);
   for (let i = 0; i < targetSize * targetSize; i++) {
     const r = pixels[i * 4] / 255.0;
@@ -233,8 +270,8 @@ function postprocess(
 
     // Convert from MODEL_SIZE center format to original pixel coordinates
     // Remove padding offset, then scale back to original image
-    const x = ((cx - pad.padX) / pad.scale);
-    const y = ((cy - pad.padY) / pad.scale);
+    const x = (cx - pad.padX) / pad.scale;
+    const y = (cy - pad.padY) / pad.scale;
     const bw = w / pad.scale;
     const bh = h / pad.scale;
 
@@ -259,14 +296,23 @@ function postprocess(
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Check if the model file is available at the expected path */
+/** Check if the model is available (remote or local) */
 export async function isModelAvailable(): Promise<boolean> {
   try {
-    const resp = await fetch(MODEL_URL, { method: "HEAD" });
-    return resp.ok;
+    // Check remote first
+    const remoteResp = await fetch(REMOTE_MODEL_URL, { method: "HEAD" });
+    if (remoteResp.ok) return true;
   } catch {
-    return false;
+    // Fall through to local
   }
+  try {
+    // Check local fallback
+    const localResp = await fetch(LOCAL_MODEL_URL, { method: "HEAD" });
+    if (localResp.ok) return true;
+  } catch {
+    // Not available
+  }
+  return false;
 }
 
 /** Get the model status message */
@@ -275,32 +321,74 @@ export async function getModelStatus(): Promise<{
   message: string;
   details: string[];
 }> {
-  const available = await isModelAvailable();
-  if (available) {
+  // Probe remote first
+  let remoteAvailable = false;
+  try {
+    const remoteResp = await fetch(REMOTE_MODEL_URL, { method: "HEAD" });
+    remoteAvailable = remoteResp.ok;
+  } catch {
+    // Not available
+  }
+
+  let localAvailable = false;
+  try {
+    const localResp = await fetch(LOCAL_MODEL_URL, { method: "HEAD" });
+    localAvailable = localResp.ok;
+  } catch {
+    // Not available
+  }
+
+  if (remoteAvailable) {
     return {
       available: true,
-      message: "RDD2022 road-damage model loaded",
+      message: "RDD2022 road-damage model loaded (remote)",
       details: [
-        "YOLOv8 ONNX model detected at /models/road-yolov8.onnx",
+        `Model: HuggingFace CDN — ${MODEL_HF_REPO}/${MODEL_HF_FILENAME}`,
         "Classes: Longitudinal Crack, Transverse Crack, Alligator Crack, Pothole",
+        "Runtime: ONNX Runtime Web (WASM)",
       ],
     };
   }
+
+  if (localAvailable) {
+    return {
+      available: true,
+      message: "RDD2022 road-damage model loaded (local)",
+      details: [
+        `Model: ${LOCAL_MODEL_URL}`,
+        "Classes: Longitudinal Crack, Transverse Crack, Alligator Crack, Pothole",
+        "Runtime: ONNX Runtime Web (WASM)",
+      ],
+    };
+  }
+
   return {
     available: false,
     message: "Real AI model not connected yet",
     details: [
-      "No YOLOv8 ONNX model found at /models/road-yolov8.onnx",
+      "No YOLOv8 ONNX model found at the remote or local source.",
       "",
-      "To connect the real model:",
-      "1. Train YOLOv8n on the RDD2022 road-damage dataset",
-      "   - Dataset: https://github.com/ai4civilengineering/RDD2022",
-      "   - Classes: D00 (Longitudinal), D10 (Transverse), D20 (Alligator), D40 (Pothole)",
-      "2. Export to ONNX:  yolo export model=best.pt format=onnx opset=12 imgsz=640",
-      "3. Place the exported file at: public/models/road-yolov8.onnx",
+      `Remote: ${REMOTE_MODEL_URL}`,
+      `Local:  ${LOCAL_MODEL_URL}`,
       "",
-      "Bridge module requires a separate model trained on GYU-DET.",
-      "Tunnel, Water, and Power modules are planned for future development.",
+      "To connect the model, upload your trained ONNX to HuggingFace:",
+      "",
+      "  1. Train YOLOv8s on the RDD2022 road-damage dataset",
+      "     - Dataset: https://github.com/ai4civilengineering/RDD2022",
+      "     - Classes: D00 (Longitudinal), D10 (Transverse),",
+      "                D20 (Alligator), D40 (Pothole)",
+      "",
+      "  2. Export to ONNX:",
+      "     yolo export model=best.pt format=onnx opset=12 imgsz=640",
+      "",
+      "  3. Upload to HuggingFace:",
+      "     huggingface-cli upload InfrRiskAI/road-yolov8-rdd2022 \\",
+      "       road-yolov8.onnx road-yolov8.onnx",
+      "",
+      "  Or place the file at: public/models/road-yolov8.onnx",
+      "",
+      "The HuggingFace CDN supports CORS (access-control-allow-origin: *),",
+      "so ONNX Runtime Web can load the model directly in the browser.",
     ],
   };
 }
@@ -341,4 +429,9 @@ export async function runInference(
   );
 
   return detections;
+}
+
+/** Get the source the model was loaded from (after first inference) */
+export function getLoadedSource(): ModelLoadSource {
+  return loadedSource;
 }

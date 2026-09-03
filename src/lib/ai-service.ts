@@ -25,6 +25,7 @@ import {
   runInference,
   isModelAvailable,
   getModelStatus,
+  getLoadedSource,
   RDD2022_INTERNAL_NAMES,
   RDD2022_LABELS,
   type RawDetection,
@@ -119,9 +120,11 @@ async function analyzeRoad(
   });
 
   const detectedClasses = [...new Set(defects.map((d) => d.defectType))];
+  const source = getLoadedSource();
+  const sourceLabel = source === "remote" ? "HuggingFace CDN (remote)" : "Local file";
   const details: string[] = [
     `Model: YOLOv8s (RDD2022 road-damage, 4 classes)`,
-    `File: /models/road-yolov8.onnx`,
+    `Source: ${sourceLabel}`,
     `Input: ${imageEl.naturalWidth}×${imageEl.naturalHeight}px`,
     `Detections (post-NMS): ${rawDetections.length}`,
     `Classes detected: ${detectedClasses.length > 0 ? detectedClasses.join(", ") : "none"}`,
@@ -317,15 +320,21 @@ function getModelNotConnectedDetails(
         "",
         "The road defect detection pipeline requires a trained YOLOv8s ONNX model.",
         "",
-        "Model file: public/models/road-yolov8.onnx",
-        "Dataset: RDD2022 (https://github.com/ai4civilengineering/RDD2022)",
-        "Classes: D00 (Longitudinal Crack), D10 (Transverse Crack),",
-        "         D20 (Alligator Crack), D40 (Pothole)",
+        "The model is loaded from HuggingFace CDN (CORS-enabled).",
+        "No API key required — the CDN serves with access-control-allow-origin: *.",
         "",
-        "Export from trained weights:",
-        "  yolo export model=best.pt format=onnx opset=12 imgsz=640",
+        "To connect:",
+        "  1. Train YOLOv8s on the RDD2022 road-damage dataset",
+        "     - Dataset: https://github.com/ai4civilengineering/RDD2022",
+        "     - Classes: D00 (Longitudinal), D10 (Transverse),",
+        "                D20 (Alligator), D40 (Pothole)",
+        "  2. Export to ONNX:  yolo export model=best.pt format=onnx opset=12 imgsz=640",
+        "  3. Upload to HuggingFace:",
+        "     huggingface-cli upload InfrRiskAI/road-yolov8-rdd2022 \\",
+        "       road-yolov8.onnx road-yolov8.onnx",
+        "  Or place at: public/models/road-yolov8.onnx",
         "",
-        "Once placed, inference runs entirely in the browser.",
+        "Once connected, inference runs entirely in the browser.",
       ];
     }
     return [`Road analysis error: ${errorMsg}`];
