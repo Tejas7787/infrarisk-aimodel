@@ -26,6 +26,7 @@ import {
   isModelAvailable,
   getModelStatus,
   getLoadedSource,
+  invalidateModelCache,
   RDD2022_INTERNAL_NAMES,
   RDD2022_LABELS,
   type RawDetection,
@@ -368,6 +369,9 @@ function getModelNotConnectedDetails(
 export async function getRoadModelStatus() {
   return getModelStatus();
 }
+
+/** Force-reload model on next inference (call after uploading a new ONNX) */
+export { invalidateModelCache };
 
 // Re-export HF model status for bridge
 export { getHFModelStatus };

@@ -42,8 +42,10 @@ import {
 import {
   analyzeInfrastructure,
   getRoadModelStatus,
+  invalidateModelCache,
   type AnalysisResult,
 } from "@/lib/ai-service";
+import { uploadModelFile, deleteModel, ROAD_MODEL_ID } from "@/lib/model-storage";
 import type { InfraType } from "@/lib/types";
 
 type SaveStatus = "idle" | "saving" | "saved" | "save_failed";
@@ -51,6 +53,7 @@ type SaveStatus = "idle" | "saving" | "saved" | "save_failed";
 export default function Inspect() {
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const modelFileInputRef = useRef<HTMLInputElement>(null);
 
   // Convex mutations
   const generateUploadUrl = useMutation(api.upload.generateUploadUrl);
@@ -79,10 +82,46 @@ export default function Inspect() {
     message: string;
     details: string[];
   } | null>(null);
+  const [isUploadingModel, setIsUploadingModel] = useState(false);
+  const [modelUploadError, setModelUploadError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refreshModelStatus = useCallback(() => {
     getRoadModelStatus().then(setModelStatus);
   }, []);
+
+  useEffect(() => {
+    refreshModelStatus();
+  }, [refreshModelStatus]);
+
+  const handleModelUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      // Validate file extension
+      if (!file.name.endsWith(".onnx")) {
+        setModelUploadError("Invalid file. Please select a .onnx model file.");
+        return;
+      }
+
+      setIsUploadingModel(true);
+      setModelUploadError(null);
+
+      try {
+        await uploadModelFile(ROAD_MODEL_ID, file);
+        invalidateModelCache();
+        await refreshModelStatus();
+      } catch (err) {
+        setModelUploadError(
+          err instanceof Error ? err.message : "Failed to store model"
+        );
+      } finally {
+        setIsUploadingModel(false);
+        if (modelFileInputRef.current) modelFileInputRef.current.value = "";
+      }
+    },
+    [refreshModelStatus]
+  );
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -332,6 +371,71 @@ export default function Inspect() {
                 </div>
               </div>
             )}
+
+            {/* Model Upload */}
+            <Card className="bg-card border-border/60">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Plug className="size-4 text-primary" />
+                  AI Model
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <input
+                  ref={modelFileInputRef}
+                  type="file"
+                  accept=".onnx"
+                  onChange={handleModelUpload}
+                  className="hidden"
+                />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Upload a YOLOv8 ONNX model trained on the RDD2022 road-damage dataset.
+                  Required classes: D00, D10, D20, D40.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => modelFileInputRef.current?.click()}
+                  disabled={isUploadingModel}
+                  className="w-full gap-2 border-border/60 bg-surface-2 hover:bg-surface-3"
+                >
+                  {isUploadingModel ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      Storing model...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="size-3.5" />
+                      Upload road-yolov8.onnx
+                    </>
+                  )}
+                </Button>
+                {modelUploadError && (
+                  <p className="text-xs text-risk-critical leading-relaxed">
+                    {modelUploadError}
+                  </p>
+                )}
+                {modelStatus?.available && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      await deleteModel(ROAD_MODEL_ID);
+                      invalidateModelCache();
+                      await refreshModelStatus();
+                    }}
+                    className="w-full gap-2 border-risk-critical/30 text-risk-critical hover:bg-risk-critical/10"
+                  >
+                    <XCircle className="size-3.5" />
+                    Remove stored model
+                  </Button>
+                )}
+                <p className="text-[10px] text-muted-foreground/50">
+                  Export from trained weights: yolo export model=best.pt format=onnx opset=12 imgsz=640
+                </p>
+              </CardContent>
+            </Card>
 
             {/* Configuration Card */}
             <Card className="bg-card border-border/60">
