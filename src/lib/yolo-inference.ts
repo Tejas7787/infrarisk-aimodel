@@ -4,10 +4,13 @@
  * Runs a YOLOv8 ONNX model in the browser via ONNX Runtime Web (WASM backend).
  * Targets the RDD2022 road-damage dataset class labels.
  *
- * Model loading priority:
- *   1. IndexedDB — user-uploaded ONNX (fastest, persists across sessions)
- *   2. Remote: HuggingFace CDN (CORS: access-control-allow-origin: *)
- *   3. Fallback: local /models/road-yolov8.onnx
+ * Model loading:
+ *   The ONNX model is bundled as a static application asset at:
+ *     /models/road-yolov8.onnx
+ *   It loads automatically on first inference — no user upload required.
+ *
+ *   An IndexedDB override allows power users to load a custom model.
+ *   This is hidden from the normal UI flow.
  *
  * Model requirements:
  *   - Format: YOLOv8 ONNX export (opset 12+, dynamic or fixed input)
@@ -52,14 +55,8 @@ const MODEL_SIZE = 640; // YOLOv8 default input size
 const CONFIDENCE_THRESHOLD = 0.25;
 const IOU_THRESHOLD = 0.45;
 
-// Remote model source: HuggingFace repo + filename
-// Update these to point to your uploaded ONNX model
-const MODEL_HF_REPO = "InfrRiskAI/road-yolov8-rdd2022";
-const MODEL_HF_FILENAME = "road-yolov8.onnx";
-const REMOTE_MODEL_URL = `https://huggingface.co/${MODEL_HF_REPO}/resolve/main/${MODEL_HF_FILENAME}`;
-
-// Local fallback
-const LOCAL_MODEL_URL = "/models/road-yolov8.onnx";
+// Permanent bundled model path (served as a static asset from public/)
+const BUNDLED_MODEL_URL = "/models/road-yolov8.onnx";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,7 +68,7 @@ export interface RawDetection {
   bbox: { x: number; y: number; width: number; height: number }; // pixels in original image
 }
 
-export type ModelLoadSource = "uploaded" | "remote" | "local" | "none";
+export type ModelLoadSource = "bundled" | "uploaded" | "none";
 
 // ---------------------------------------------------------------------------
 // Model singleton
@@ -80,7 +77,7 @@ let sessionPromise: Promise<ort.InferenceSession> | null = null;
 let loadedSource: ModelLoadSource = "none";
 
 async function fetchModelBytes(): Promise<{ bytes: ArrayBuffer; source: ModelLoadSource }> {
-  // 1. Try IndexedDB (user-uploaded model — fastest)
+  // 1. Try IndexedDB override (power user uploaded a custom model)
   try {
     const stored = await loadFromIDB(MODEL_ID);
     if (stored?.arrayBuffer) {
@@ -90,26 +87,15 @@ async function fetchModelBytes(): Promise<{ bytes: ArrayBuffer; source: ModelLoa
     // IndexedDB error — fall through
   }
 
-  // 2. Try remote HuggingFace CDN (CORS: access-control-allow-origin: *)
+  // 2. Load bundled static asset (the permanent default)
   try {
-    const remoteResp = await fetch(REMOTE_MODEL_URL, { method: "HEAD" });
-    if (remoteResp.ok) {
-      const bytes = await fetch(REMOTE_MODEL_URL).then((r) => r.arrayBuffer());
-      return { bytes, source: "remote" };
+    const resp = await fetch(BUNDLED_MODEL_URL);
+    if (resp.ok) {
+      const bytes = await resp.arrayBuffer();
+      return { bytes, source: "bundled" };
     }
   } catch {
-    // CORS or network failure — fall through
-  }
-
-  // 3. Fallback: local file in public/models/
-  try {
-    const localResp = await fetch(LOCAL_MODEL_URL, { method: "HEAD" });
-    if (localResp.ok) {
-      const bytes = await fetch(LOCAL_MODEL_URL).then((r) => r.arrayBuffer());
-      return { bytes, source: "local" };
-    }
-  } catch {
-    // File not found locally
+    // File not found
   }
 
   throw new Error("MODEL_NOT_CONNECTED");
@@ -272,7 +258,6 @@ function postprocess(
     if (bestScore < confThreshold) continue;
 
     // Convert from MODEL_SIZE center format to original pixel coordinates
-    // Remove padding offset, then scale back to original image
     const x = (cx - pad.padX) / pad.scale;
     const y = (cy - pad.padY) / pad.scale;
     const bw = w / pad.scale;
@@ -299,25 +284,18 @@ function postprocess(
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Check if the model is available (uploaded, remote, or local) */
+/** Check if the model is available (bundled or uploaded) */
 export async function isModelAvailable(): Promise<boolean> {
-  // 1. Check IndexedDB
+  // 1. Check IndexedDB override
   try {
     if (await isModelStored(MODEL_ID)) return true;
   } catch {
     // Fall through
   }
-  // 2. Check remote
+  // 2. Check bundled static asset
   try {
-    const remoteResp = await fetch(REMOTE_MODEL_URL, { method: "HEAD" });
-    if (remoteResp.ok) return true;
-  } catch {
-    // Fall through
-  }
-  // 3. Check local
-  try {
-    const localResp = await fetch(LOCAL_MODEL_URL, { method: "HEAD" });
-    if (localResp.ok) return true;
+    const resp = await fetch(BUNDLED_MODEL_URL, { method: "HEAD" });
+    if (resp.ok) return true;
   } catch {
     // Not available
   }
@@ -330,7 +308,7 @@ export async function getModelStatus(): Promise<{
   message: string;
   details: string[];
 }> {
-  // 1. Check IndexedDB (user-uploaded)
+  // 1. Check IndexedDB override
   let uploadedAvailable = false;
   try {
     uploadedAvailable = await isModelStored(MODEL_ID);
@@ -341,55 +319,33 @@ export async function getModelStatus(): Promise<{
   if (uploadedAvailable) {
     return {
       available: true,
-      message: "Road model connected (uploaded)",
+      message: "AI model loaded (custom)",
       details: [
-        "YOLOv8 ONNX model loaded from browser storage (IndexedDB)",
+        "YOLOv8 ONNX model loaded from browser storage",
         "Classes: Longitudinal Crack (D00), Transverse Crack (D10),",
-        "         Alligator Crack (D20), Pothole (D40)",
+        "         Alligator/Fatigue Crack (D20), Pothole (D40)",
         "Runtime: ONNX Runtime Web (WASM)",
       ],
     };
   }
 
-  // 2. Check remote
-  let remoteAvailable = false;
+  // 2. Check bundled static asset
+  let bundledAvailable = false;
   try {
-    const remoteResp = await fetch(REMOTE_MODEL_URL, { method: "HEAD" });
-    remoteAvailable = remoteResp.ok;
+    const resp = await fetch(BUNDLED_MODEL_URL, { method: "HEAD" });
+    bundledAvailable = resp.ok;
   } catch {
     // Not available
   }
 
-  if (remoteAvailable) {
+  if (bundledAvailable) {
     return {
       available: true,
-      message: "Road model connected (remote)",
+      message: "AI model loaded",
       details: [
-        `Model: HuggingFace CDN — ${MODEL_HF_REPO}/${MODEL_HF_FILENAME}`,
+        "YOLOv8 ONNX model (RDD2022 road-damage, 4 classes)",
         "Classes: Longitudinal Crack (D00), Transverse Crack (D10),",
-        "         Alligator Crack (D20), Pothole (D40)",
-        "Runtime: ONNX Runtime Web (WASM)",
-      ],
-    };
-  }
-
-  // 3. Check local
-  let localAvailable = false;
-  try {
-    const localResp = await fetch(LOCAL_MODEL_URL, { method: "HEAD" });
-    localAvailable = localResp.ok;
-  } catch {
-    // Not available
-  }
-
-  if (localAvailable) {
-    return {
-      available: true,
-      message: "Road model connected (local)",
-      details: [
-        `Model: ${LOCAL_MODEL_URL}`,
-        "Classes: Longitudinal Crack (D00), Transverse Crack (D10),",
-        "         Alligator Crack (D20), Pothole (D40)",
+        "         Alligator/Fatigue Crack (D20), Pothole (D40)",
         "Runtime: ONNX Runtime Web (WASM)",
       ],
     };
@@ -397,18 +353,14 @@ export async function getModelStatus(): Promise<{
 
   return {
     available: false,
-    message: "Road model not connected",
+    message: "AI model unavailable",
     details: [
-      "Upload a YOLOv8 ONNX model trained on the RDD2022 road-damage dataset.",
+      "The road defect detection model could not be loaded.",
       "",
-      "Required: 4 classes — D00 (Longitudinal Crack), D10 (Transverse Crack),",
-      "          D20 (Alligator/Fatigue Crack), D40 (Pothole)",
+      "Expected location: /models/road-yolov8.onnx",
       "",
-      "To export from trained weights:",
-      "  yolo export model=best.pt format=onnx opset=12 imgsz=640",
-      "",
-      "Upload the .onnx file using the upload panel above.",
-      "The model is stored locally in your browser (IndexedDB).",
+      "The model file must be present as a bundled application asset.",
+      "Contact the administrator to restore the model file.",
     ],
   };
 }
@@ -458,7 +410,7 @@ export function getLoadedSource(): ModelLoadSource {
 
 /**
  * Invalidate the cached model session.
- * Call this after a new model is uploaded to force reload from IndexedDB.
+ * Call this after uploading a custom model to force reload.
  */
 export function invalidateModelCache(): void {
   sessionPromise = null;

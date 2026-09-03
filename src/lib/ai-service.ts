@@ -122,7 +122,7 @@ async function analyzeRoad(
 
   const detectedClasses = [...new Set(defects.map((d) => d.defectType))];
   const source = getLoadedSource();
-  const sourceLabel = source === "remote" ? "HuggingFace CDN (remote)" : "Local file";
+  const sourceLabel = source === "uploaded" ? "Custom (browser storage)" : "Bundled application asset";
   const details: string[] = [
     `Model: YOLOv8s (RDD2022 road-damage, 4 classes)`,
     `Source: ${sourceLabel}`,
@@ -317,25 +317,14 @@ function getModelNotConnectedDetails(
   if (infraType === "road") {
     if (errorMsg === "MODEL_NOT_CONNECTED") {
       return [
-        "Real AI model not connected yet.",
+        "AI model unavailable.",
         "",
-        "The road defect detection pipeline requires a trained YOLOv8s ONNX model.",
+        "The road defect detection model could not be loaded.",
         "",
-        "The model is loaded from HuggingFace CDN (CORS-enabled).",
-        "No API key required — the CDN serves with access-control-allow-origin: *.",
+        "Expected location: /models/road-yolov8.onnx",
         "",
-        "To connect:",
-        "  1. Train YOLOv8s on the RDD2022 road-damage dataset",
-        "     - Dataset: https://github.com/ai4civilengineering/RDD2022",
-        "     - Classes: D00 (Longitudinal), D10 (Transverse),",
-        "                D20 (Alligator), D40 (Pothole)",
-        "  2. Export to ONNX:  yolo export model=best.pt format=onnx opset=12 imgsz=640",
-        "  3. Upload to HuggingFace:",
-        "     huggingface-cli upload InfrRiskAI/road-yolov8-rdd2022 \\",
-        "       road-yolov8.onnx road-yolov8.onnx",
-        "  Or place at: public/models/road-yolov8.onnx",
-        "",
-        "Once connected, inference runs entirely in the browser.",
+        "The ONNX model file must be present as a bundled application asset.",
+        "Contact the administrator to restore the model file.",
       ];
     }
     return [`Road analysis error: ${errorMsg}`];
