@@ -41,7 +41,7 @@ import {
 } from "@/lib/risk-engine";
 import {
   analyzeInfrastructure,
-  getHFModelStatus,
+  getRoadModelStatus,
   type AnalysisResult,
 } from "@/lib/ai-service";
 import type { InfraType } from "@/lib/types";
@@ -73,7 +73,7 @@ export default function Inspect() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [savedInspectionId, setSavedInspectionId] = useState<string | null>(null);
 
-  // Model status (HF DETR model)
+  // Model status (YOLOv8 ONNX for road)
   const [modelStatus, setModelStatus] = useState<{
     available: boolean;
     message: string;
@@ -81,7 +81,7 @@ export default function Inspect() {
   } | null>(null);
 
   useEffect(() => {
-    getHFModelStatus().then(setModelStatus);
+    getRoadModelStatus().then(setModelStatus);
   }, []);
 
   const handleFileChange = useCallback(
@@ -327,7 +327,7 @@ export default function Inspect() {
                 <div className="flex items-center gap-3">
                   <Loader2 className="size-4 text-muted-foreground animate-spin" />
                   <p className="text-sm text-muted-foreground">
-                    Loading AI model from Hugging Face...
+                    Checking model status...
                   </p>
                 </div>
               </div>
@@ -530,7 +530,7 @@ export default function Inspect() {
                     Running inference...
                   </h3>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Loading DETR model, preprocessing image, running object detection
+                    Loading model, preprocessing image, running detection
                   </p>
                 </CardContent>
               </Card>
@@ -597,8 +597,8 @@ export default function Inspect() {
                           </p>
                           <p className="text-[11px] text-muted-foreground">
                             {result.modelConnected
-                              ? `${result.defects.length} detection(s) from DETR-ResNet-50`
-                              : "No real inference performed — model not loaded"}
+                              ? `${result.defects.length} defect(s) detected`
+                              : "No real inference performed — model not connected"}
                           </p>
                         </div>
                       </div>
