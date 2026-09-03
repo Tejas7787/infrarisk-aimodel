@@ -199,18 +199,33 @@ export function getDefectLabel(
   infraType: InfraType
 ): string {
   const labels: Record<string, string> = {
+    // Road defect types (RDD2022)
     longitudinal_crack: "Longitudinal Crack",
     transverse_crack: "Transverse Crack",
     alligator_crack: "Alligator Crack",
     pothole: "Pothole",
+    // Bridge defect types (GYU-DET)
     crack: "Crack",
     spalling: "Spalling",
     exposed_reinforcement: "Exposed Reinforcement",
     seepage: "Seepage",
     corrosion: "Corrosion",
     other: "Other Defect",
+    // Infrastructure-mapped detections (from DETR/COCO analysis)
+    traffic_evidence: "Traffic Evidence",
+    heavy_traffic_evidence: "Heavy Traffic Evidence",
+    pedestrian_presence: "Pedestrian Presence",
+    infrastructure_present: "Infrastructure Element",
+    street_furniture: "Street Furniture",
+    construction_zone: "Construction Zone",
+    debris_evidence: "Debris / Surface Item",
   };
-  return labels[defectType] ?? defectType;
+  // For 'observed_*' prefixed types, format nicely
+  if (defectType.startsWith("observed_")) {
+    const label = defectType.replace("observed_", "").replace(/_/g, " ");
+    return `Observed: ${label.charAt(0).toUpperCase()}${label.slice(1)}`;
+  }
+  return labels[defectType] ?? defectType.replace(/_/g, " ");
 }
 
 export function getSeverityColor(severity: SeverityLevel): string {

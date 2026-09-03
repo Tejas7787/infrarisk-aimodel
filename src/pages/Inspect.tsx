@@ -41,9 +41,9 @@ import {
 } from "@/lib/risk-engine";
 import {
   analyzeInfrastructure,
+  getHFModelStatus,
   type AnalysisResult,
 } from "@/lib/ai-service";
-import { getModelStatus } from "@/lib/yolo-inference";
 import type { InfraType } from "@/lib/types";
 
 type SaveStatus = "idle" | "saving" | "saved" | "save_failed";
@@ -73,7 +73,7 @@ export default function Inspect() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [savedInspectionId, setSavedInspectionId] = useState<string | null>(null);
 
-  // Model status
+  // Model status (HF DETR model)
   const [modelStatus, setModelStatus] = useState<{
     available: boolean;
     message: string;
@@ -81,7 +81,7 @@ export default function Inspect() {
   } | null>(null);
 
   useEffect(() => {
-    getModelStatus().then(setModelStatus);
+    getHFModelStatus().then(setModelStatus);
   }, []);
 
   const handleFileChange = useCallback(
@@ -327,7 +327,7 @@ export default function Inspect() {
                 <div className="flex items-center gap-3">
                   <Loader2 className="size-4 text-muted-foreground animate-spin" />
                   <p className="text-sm text-muted-foreground">
-                    Checking model status...
+                    Loading AI model from Hugging Face...
                   </p>
                 </div>
               </div>
@@ -512,8 +512,8 @@ export default function Inspect() {
                   </h3>
                   <p className="mt-2 text-sm text-muted-foreground max-w-sm mx-auto leading-relaxed">
                     {modelStatus?.available
-                      ? 'Select infrastructure type, upload an image, and click "Analyze with AI" to run the real inference pipeline.'
-                      : "Upload an image and select infrastructure type. The real AI model must be connected before analysis can run."}
+                      ? 'Select infrastructure type, upload an image, and click "Analyze with AI" to run real inference.'
+                      : "Upload an image and select infrastructure type. The AI model must be loaded before analysis can run."}
                   </p>
                 </CardContent>
               </Card>
@@ -530,7 +530,7 @@ export default function Inspect() {
                     Running inference...
                   </h3>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Loading model, preprocessing image, running YOLOv8 detection
+                    Loading DETR model, preprocessing image, running object detection
                   </p>
                 </CardContent>
               </Card>
@@ -548,7 +548,7 @@ export default function Inspect() {
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-semibold text-amber-300">
-                          Real AI model not connected yet
+                          AI model could not be loaded
                         </p>
                         <p className="text-xs text-amber-200/70 mt-1 leading-relaxed">
                           {result.modelNote}
@@ -597,8 +597,8 @@ export default function Inspect() {
                           </p>
                           <p className="text-[11px] text-muted-foreground">
                             {result.modelConnected
-                              ? `${result.defects.length} defect(s) detected by YOLOv8`
-                              : "No real inference performed — model not connected"}
+                              ? `${result.defects.length} detection(s) from DETR-ResNet-50`
+                              : "No real inference performed — model not loaded"}
                           </p>
                         </div>
                       </div>
@@ -658,7 +658,7 @@ export default function Inspect() {
                 <Card className="bg-card border-border/60">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm font-semibold text-foreground">
-                      Detected Defects
+                      Detected Objects
                       <span className="ml-2 text-muted-foreground font-normal">
                         ({result.defects.length})
                       </span>
@@ -669,8 +669,8 @@ export default function Inspect() {
                       <div className="py-8 text-center">
                         <p className="text-sm text-muted-foreground">
                           {result.modelConnected
-                            ? "No visible defects detected in this image"
-                            : "Connect the real model to see detections"}
+                            ? "No relevant objects detected in this image"
+                            : "Load the AI model to see detections"}
                         </p>
                       </div>
                     ) : (
@@ -692,6 +692,11 @@ export default function Inspect() {
                                   Confidence:{" "}
                                   {(defect.confidence * 100).toFixed(1)}%
                                 </p>
+                                {defect.description && (
+                                  <p className="text-[11px] text-muted-foreground/60 mt-1 leading-relaxed">
+                                    {defect.description}
+                                  </p>
+                                )}
                               </div>
                               <Badge
                                 variant="outline"
@@ -722,7 +727,7 @@ export default function Inspect() {
                   </CardContent>
                 </Card>
 
-                {/* Risk Assessment (only shown when real defects exist) */}
+                {/* Risk Assessment (only shown when real detections exist) */}
                 {result.modelConnected && result.defects.length > 0 && (
                   <>
                     <Card className="bg-card border-border/60">

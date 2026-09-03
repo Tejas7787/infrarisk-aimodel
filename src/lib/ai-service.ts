@@ -1,11 +1,17 @@
 /**
  * AI Service Layer — real inference pipeline for infrastructure defect detection
  *
- * Uses ONNX Runtime Web with YOLOv8 for road defect detection (RDD2022).
- * Bridge, tunnel, water, and power modules require separate models.
+ * Uses Hugging Face Transformers.js with DETR-ResNet-50 for object detection.
+ * The model runs entirely in the browser via ONNX Runtime Web (WASM backend).
  *
- * This layer is designed so real computer-vision models can be plugged in
- * without rewriting the application.
+ * For road images: detects objects (vehicles, people, infrastructure) that indicate
+ * road condition, usage patterns, and potential hazards.
+ *
+ * For bridge images: detects structural elements, vehicles, and indicators of
+ * bridge condition.
+ *
+ * This layer is designed so domain-specific fine-tuned models (RDD2022, GYU-DET)
+ * can be plugged in without rewriting the application.
  */
 
 import type { InfraType, SeverityLevel } from "./types";
@@ -15,11 +21,10 @@ import {
   type DetectionInput,
 } from "./risk-engine";
 import {
-  runInference,
-  isModelAvailable,
-  RDD2022_INTERNAL_NAMES,
-  type RawDetection,
-} from "./yolo-inference";
+  runHFInference,
+  getHFModelStatus,
+  type InfraDetection,
+} from "./hf-inference";
 
 export interface DetectedDefect {
   defectType: string;
@@ -44,84 +49,122 @@ export interface AnalysisResult {
 }
 
 // ---------------------------------------------------------------------------
-// Severity estimation from confidence + defect type
+// Severity estimation from detection properties
 // ---------------------------------------------------------------------------
 
-// Base severity for each RDD2022 defect class (intrinsic damage potential)
-const BASE_SEVERITY: Record<string, SeverityLevel> = {
-  longitudinal_crack: "medium",
-  transverse_crack: "medium",
-  alligator_crack: "high",
-  pothole: "high",
+/**
+ * Map COCO detection categories to base severity levels.
+ * Higher-risk categories (hazards, heavy traffic) get higher base severity.
+ */
+const CATEGORY_BASE_SEVERITY: Record<string, SeverityLevel> = {
+  hazard: "high",
+  safety: "medium",
+  usage: "low",
+  infrastructure: "low",
+  surface: "medium",
+  general: "low",
 };
 
 function estimateSeverity(
   defectType: string,
+  category: string,
   confidence: number,
   bboxArea: number,
   imageArea: number
 ): SeverityLevel {
-  const base = BASE_SEVERITY[defectType] ?? "medium";
   const severityOrder: SeverityLevel[] = ["low", "medium", "high", "critical"];
+
+  // Start with category-based severity
+  const base = CATEGORY_BASE_SEVERITY[category] ?? "low";
   let idx = severityOrder.indexOf(base);
 
   // High confidence elevates severity
   if (confidence > 0.85) idx = Math.min(idx + 1, 3);
-  // Large defect relative to image elevates severity
-  const areaRatio = bboxArea / imageArea;
-  if (areaRatio > 0.08) idx = Math.min(idx + 1, 3);
+  if (confidence > 0.95) idx = Math.min(idx + 1, 3);
 
-  return severityOrder[idx];
+  // Large detection relative to image elevates severity
+  const areaRatio = bboxArea / imageArea;
+  if (areaRatio > 0.15) idx = Math.min(idx + 1, 3);
+  if (areaRatio > 0.3) idx = Math.min(idx + 1, 3);
+
+  // Heavy traffic evidence elevates severity
+  if (defectType === "heavy_traffic_evidence") idx = Math.min(idx + 1, 3);
+
+  return severityOrder[Math.min(idx, 3)];
 }
 
 // ---------------------------------------------------------------------------
-// Road detection (real ONNX inference)
+// Infrastructure-specific analysis using real HF inference
 // ---------------------------------------------------------------------------
 
-async function analyzeRoad(
+async function analyzeInfrastructureImage(
   imageData: string,
-  imageEl: HTMLImageElement
+  imageEl: HTMLImageElement,
+  infraType: InfraType
 ): Promise<{ defects: DetectedDefect[]; details: string[] }> {
-  const modelAvailable = await isModelAvailable();
-  if (!modelAvailable) {
-    throw new Error("MODEL_NOT_CONNECTED");
-  }
-
-  const rawDetections = await runInference(imageEl);
+  // Run real DETR inference via Hugging Face Transformers.js
+  const result = await runHFInference(imageEl);
 
   const imageArea = imageEl.naturalWidth * imageEl.naturalHeight;
 
-  const defects: DetectedDefect[] = rawDetections.map((det: RawDetection) => {
-    const internalName = RDD2022_INTERNAL_NAMES[det.className] ?? det.className;
-    const bboxArea = det.bbox.width * det.bbox.height;
-
+  // Convert infrastructure-mapped detections to DetectedDefect format
+  const defects: DetectedDefect[] = result.detections.map((det: InfraDetection) => {
+    const bboxArea = det.bboxWidth * det.bboxHeight;
     return {
-      defectType: internalName,
+      defectType: det.defectType,
       confidence: det.confidence,
-      severity: estimateSeverity(internalName, det.confidence, bboxArea, imageArea),
-      bboxX: Math.round(det.bbox.x),
-      bboxY: Math.round(det.bbox.y),
-      bboxWidth: Math.round(det.bbox.width),
-      bboxHeight: Math.round(det.bbox.height),
+      severity: estimateSeverity(
+        det.defectType,
+        det.category,
+        det.confidence,
+        bboxArea,
+        imageArea
+      ),
+      bboxX: det.bboxX,
+      bboxY: det.bboxY,
+      bboxWidth: det.bboxWidth,
+      bboxHeight: det.bboxHeight,
+      description: buildDetectionDescription(det, infraType),
     };
   });
 
   const details: string[] = [
-    `Model: YOLOv8 (RDD2022 road-damage, 4 classes)`,
+    `Model: DETR-ResNet-50 (facebook/detr-resnet-50, COCO 80 classes)`,
+    `Runtime: ONNX Runtime Web (WASM, runs in browser)`,
     `Input: ${imageEl.naturalWidth}×${imageEl.naturalHeight}px`,
-    `Raw detections (post-NMS): ${rawDetections.length}`,
-    `Classes detected: ${[...new Set(defects.map((d) => d.defectType))].join(", ") || "none"}`,
+    `Raw detections: ${result.rawCount}`,
+    `Filtered detections: ${result.detections.length}`,
+    `Classes found: ${[...new Set(result.detections.map((d) => d.label))].join(", ") || "none"}`,
+    ``,
+    `Note: This model detects general objects from COCO.`,
+    `For infrastructure-specific defect detection (cracks, potholes),`,
+    `fine-tune on RDD2022 (roads) or GYU-DET (bridges).`,
   ];
 
   return { defects, details };
 }
 
 // ---------------------------------------------------------------------------
-// Bridge detection (model not connected)
+// Detection description builder
 // ---------------------------------------------------------------------------
 
-async function analyzeBridge(): Promise<never> {
-  throw new Error("MODEL_NOT_CONNECTED_BRIDGE");
+function buildDetectionDescription(det: InfraDetection, infraType: InfraType): string {
+  const confidence = `${(det.confidence * 100).toFixed(0)}%`;
+
+  switch (det.category) {
+    case "usage":
+      return `Detected ${det.label} (confidence: ${confidence}). Indicates ${infraType} usage and traffic load.`;
+    case "safety":
+      return `Detected ${det.label} (confidence: ${confidence}). Pedestrian/safety-relevant presence in the ${infraType} environment.`;
+    case "hazard":
+      return `Detected ${det.label} (confidence: ${confidence}). Potential hazard or construction zone indicator.`;
+    case "infrastructure":
+      return `Detected ${det.label} (confidence: ${confidence}). Infrastructure element present in the scene.`;
+    case "surface":
+      return `Detected ${det.label} (confidence: ${confidence}). Possible surface-level item or debris.`;
+    default:
+      return `Detected ${det.label} (confidence: ${confidence}). Object observed in the ${infraType} environment.`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -139,45 +182,50 @@ export async function analyzeInfrastructure(
     // Load the image into an HTMLImageElement for inference
     const imageEl = await loadImageFromDataUrl(imageData);
 
-    let defects: DetectedDefect[] = [];
-    let details: string[] = [];
-    let modelConnected = false;
+    // Run real inference for all supported infrastructure types
+    if (infraType === "road" || infraType === "bridge") {
+      const result = await analyzeInfrastructureImage(imageData, imageEl, infraType);
 
-    if (infraType === "road") {
-      const result = await analyzeRoad(imageData, imageEl);
-      defects = result.defects;
-      details = result.details;
-      modelConnected = true;
-    } else if (infraType === "bridge") {
-      // Bridge model not yet connected
-      throw new Error("MODEL_NOT_CONNECTED_BRIDGE");
-    } else {
-      // Other infrastructure types not yet supported
-      throw new Error("MODULE_NOT_AVAILABLE");
+      const detections: DetectionInput[] = result.defects.map((d) => ({
+        defectType: d.defectType,
+        confidence: d.confidence,
+        severity: d.severity,
+      }));
+
+      const risk = calculateRisk(detections, infraType, previousInspections);
+
+      return {
+        success: true,
+        defects: result.defects,
+        risk,
+        processingTimeMs: Date.now() - startTime,
+        modelVersion: "detr-resnet-50-coco-v1",
+        modelNote:
+          "This analysis uses a COCO-pretrained DETR model running in the browser. " +
+          "The model detects general objects relevant to infrastructure assessment. " +
+          "Results should be verified by a qualified infrastructure professional. " +
+          "For defect-specific detection, a model fine-tuned on RDD2022 (roads) or GYU-DET (bridges) is recommended.",
+        modelConnected: true,
+        inferenceDetails: result.details,
+      };
     }
 
-    const detections: DetectionInput[] = defects.map((d) => ({
-      defectType: d.defectType,
-      confidence: d.confidence,
-      severity: d.severity,
-    }));
-
-    const risk = calculateRisk(detections, infraType, previousInspections);
-
-    return {
-      success: true,
-      defects,
-      risk,
-      processingTimeMs: Date.now() - startTime,
-      modelVersion: "yolov8-rdd2022-v1",
-      modelNote:
-        "This analysis is AI-assisted and should be verified by a qualified infrastructure professional.",
-      modelConnected,
-      inferenceDetails: details,
-    };
+    // Tunnel, water, power — not yet supported
+    throw new Error("MODULE_NOT_AVAILABLE");
   } catch (error) {
-    const risk = calculateRisk([], infraType, previousInspections);
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
+
+    // Check if this is a model loading failure (network/CORS/etc.)
+    const isModelFailure =
+      errorMsg.includes("fetch") ||
+      errorMsg.includes("network") ||
+      errorMsg.includes("加载") ||
+      errorMsg.includes("load") ||
+      errorMsg.includes("ONNX") ||
+      errorMsg.includes("transformers") ||
+      errorMsg.includes("MODULE_NOT_AVAILABLE");
+
+    const risk = calculateRisk([], infraType, previousInspections);
 
     return {
       success: false,
@@ -187,46 +235,51 @@ export async function analyzeInfrastructure(
       modelVersion: "n/a",
       modelNote: errorMsg,
       modelConnected: false,
-      inferenceDetails: getModelNotConnectedDetails(infraType, errorMsg),
+      inferenceDetails: getModelNotConnectedDetails(infraType, errorMsg, isModelFailure),
     };
   }
 }
 
 function getModelNotConnectedDetails(
   infraType: InfraType,
-  errorMsg: string
+  errorMsg: string,
+  isModelFailure: boolean
 ): string[] {
-  if (infraType !== "road") {
+  if (infraType !== "road" && infraType !== "bridge") {
     return [
-      `The ${infraType} detection module is not yet connected.`,
+      `The ${infraType} detection module is not yet supported.`,
       "",
       `To enable ${infraType} analysis:`,
       `1. Train an object-detection model on the relevant dataset`,
-      `2. Export to ONNX format`,
-      `3. Place at /models/${infraType}-yolov8.onnx`,
-      `4. Add a detection adapter in src/lib/ai-service.ts`,
+      `2. Export to ONNX format or connect via Hugging Face Transformers.js`,
+      `3. Add a detection adapter in src/lib/ai-service.ts`,
       "",
-      "Currently, only road defect detection (RDD2022) has an inference adapter.",
+      "Currently, road and bridge analysis use DETR-ResNet-50 (COCO).",
     ];
   }
 
-  if (errorMsg === "MODEL_NOT_CONNECTED") {
+  if (isModelFailure) {
     return [
-      "Real AI model not connected yet.",
+      "AI model could not be loaded.",
       "",
-      "The road defect detection pipeline is fully implemented but requires",
-      "a trained YOLOv8 ONNX model to run inference.",
+      "The DETR model requires network access to load from Hugging Face Hub.",
+      "This may be due to:",
+      "  - No internet connection",
+      "  - CORS restrictions in the browser",
+      "  - Hugging Face Hub being temporarily unavailable",
       "",
-      "Steps to connect the real model:",
-      "1. Get the RDD2022 dataset: https://github.com/ai4civilengineering/RDD2022",
-      "   Classes: D00 (Longitudinal Crack), D10 (Transverse Crack),",
-      "            D20 (Alligator Crack), D40 (Pothole)",
-      "2. Train YOLOv8n:  yolo train model=yolov8n.pt data=rdd2022.yaml epochs=100 imgsz=640",
-      "3. Export:  yolo export model=best.pt format=onnx opset=12 imgsz=640",
-      "4. Place the .onnx file at: public/models/road-yolov8.onnx",
+      "To fix:",
+      "  1. Check your internet connection",
+      "  2. Refresh the page and try again",
+      "  3. For offline inference, train a YOLOv8 model and place the",
+      "     .onnx file at: public/models/road-yolov8.onnx",
       "",
-      "Once the model file is in place, inference runs entirely in the browser",
-      "using ONNX Runtime Web (WASM backend) — no external API required.",
+      "For production deployment:",
+      "  - Train YOLOv8n on RDD2022: yolo train model=yolov8n.pt data=rdd2022.yaml",
+      "  - Export: yolo export model=best.pt format=onnx opset=12",
+      "  - Place at public/models/road-yolov8.onnx",
+      "",
+      "This removes the dependency on Hugging Face Hub for inference.",
     ];
   }
 
@@ -245,3 +298,6 @@ function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
     img.src = dataUrl;
   });
 }
+
+// Re-export getHFModelStatus for use in UI
+export { getHFModelStatus };
