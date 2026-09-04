@@ -108,12 +108,13 @@ async function getModelSession(): Promise<ort.InferenceSession> {
       loadedSource = source;
 
       // Point ONNX Runtime at the WASM backend files served from public/ort/
-      // The object form provides separate overrides for .wasm and .mjs files,
-      // which is required for onnxruntime-web v1.29.0's JSEP/Worker loading chain.
-      ort.env.wasm.wasmPaths = {
-        wasm: "/ort/ort-wasm-simd-threaded.wasm",
-        mjs: "/ort/ort-wasm-simd-threaded.mjs",
-      };
+      // String form is required for ORT v1.29.0: the JSEP backend module URL is
+      // built as new URL("ort-wasm-simd-threaded.jsep.mjs", wasmPaths). With the
+      // object form, that base is undefined and the .mjs import resolves against
+      // the library's own bundle URL inside node_modules (never served), failing
+      // with "no available backend found". The object form's `mjs` key only
+      // affects the optional Web Worker proxy path, not this import.
+      ort.env.wasm.wasmPaths = "/ort/";
       // Force single-threading: SharedArrayBuffer requires cross-origin isolation
       // headers (COOP/COEP) which may not be present in the dev server.
       ort.env.wasm.numThreads = 1;
