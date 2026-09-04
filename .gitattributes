@@ -1,0 +1,2 @@
+# Git LFS — track large binary assets
+*.onnx filter=lfs diff=lfs merge=lfs -text
