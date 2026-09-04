@@ -107,6 +107,8 @@ async function getModelSession(): Promise<ort.InferenceSession> {
       const { bytes, source } = await fetchModelBytes();
       loadedSource = source;
 
+      // Point ONNX Runtime at the WASM backend files served from public/ort/
+      ort.env.wasm.wasmPaths = "/ort/";
       ort.env.wasm.numThreads = navigator.hardwareConcurrency || 4;
 
       const session = await ort.InferenceSession.create(bytes, {
