@@ -111,8 +111,8 @@ async function getModelSession(): Promise<ort.InferenceSession> {
       // The object form provides separate overrides for .wasm and .mjs files,
       // which is required for onnxruntime-web v1.29.0's JSEP/Worker loading chain.
       ort.env.wasm.wasmPaths = {
-        wasm: "/ort/",
-        mjs: "/ort/",
+        wasm: "/ort/ort-wasm-simd-threaded.wasm",
+        mjs: "/ort/ort-wasm-simd-threaded.mjs",
       };
       // Force single-threading: SharedArrayBuffer requires cross-origin isolation
       // headers (COOP/COEP) which may not be present in the dev server.
