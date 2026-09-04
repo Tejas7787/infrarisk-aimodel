@@ -58,6 +58,78 @@ const IOU_THRESHOLD = 0.45;
 // Permanent bundled model path (served as a static asset from public/)
 const BUNDLED_MODEL_URL = "/models/road-yolov8.onnx";
 
+// A real YOLOv8s ONNX model is tens of MB. Anything below this is a placeholder
+// (e.g. an un-materialized Git LFS pointer, which is ~133 bytes) — detect it so
+// the UI reports "AI model unavailable" instead of a false "AI model loaded".
+const MIN_MODEL_BYTES = 1024 * 1024; // 1 MB
+
+/**
+ * Validate that an ArrayBuffer looks like a real ONNX protobuf model.
+ * ONNX files start with field 1 (ir_version) varint: byte 0x08 followed by a
+ * small version number (e.g. 08 07 = ONNX opset IR v7, emitted by PyTorch).
+ * Combined with the minimum size, this reliably rejects HTML error pages and
+ * Git LFS pointer files ("version https://git-lfs.github.com/spec/v1\n...").
+ */
+function isValidOnnxBuffer(buffer: ArrayBuffer): boolean {
+  if (buffer.byteLength < MIN_MODEL_BYTES) return false;
+  const b = new Uint8Array(buffer, 0, 2);
+  return b[0] === 0x08 && b[1] >= 0x02 && b[1] <= 0x0a;
+}
+
+/**
+ * Lightweight probe of the bundled model file that does NOT download the full
+ * body: requests only the first 16 bytes via HTTP Range and validates the ONNX
+ * magic bytes plus the declared total size. Falls back to just checking the
+ * declared size when the server ignores the Range header.
+ */
+async function probeBundledModel(): Promise<{
+  valid: boolean;
+  reachable: boolean;
+  totalBytes: number;
+}> {
+  try {
+    const resp = await fetch(BUNDLED_MODEL_URL, {
+      headers: { Range: "bytes=0-15" },
+    });
+    if (!resp.ok) return { valid: false, reachable: false, totalBytes: 0 };
+
+    // Declared size: Content-Range total (206) or Content-Length (Range ignored)
+    let totalBytes = 0;
+    const contentRange = resp.headers.get("content-range");
+    if (contentRange) {
+      const match = contentRange.match(/\/(\d+)$/);
+      if (match) totalBytes = parseInt(match[1], 10);
+    } else {
+      totalBytes = Number(resp.headers.get("content-length") ?? "0");
+    }
+
+    // Read only the first chunk of the body, then cancel the stream — the
+    // server may ignore Range and return the full 44 MB response.
+    const reader = resp.body?.getReader();
+    if (reader) {
+      try {
+        const { value } = await reader.read();
+        if (value && value.length >= 2) {
+          const magicOk =
+            value[0] === 0x08 && value[1] >= 0x02 && value[1] <= 0x0a;
+          if (!magicOk || (totalBytes > 0 && totalBytes < MIN_MODEL_BYTES)) {
+            return { valid: false, reachable: true, totalBytes };
+          }
+          return { valid: true, reachable: true, totalBytes };
+        }
+      } finally {
+        reader.cancel().catch(() => {});
+      }
+    }
+
+    // No stream available — fall back to declared size only
+    const sizeOk = totalBytes >= MIN_MODEL_BYTES;
+    return { valid: sizeOk, reachable: true, totalBytes };
+  } catch {
+    return { valid: false, reachable: false, totalBytes: 0 };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -81,7 +153,14 @@ async function fetchModelBytes(): Promise<{ bytes: ArrayBuffer; source: ModelLoa
   try {
     const stored = await loadFromIDB(MODEL_ID);
     if (stored?.arrayBuffer) {
-      return { bytes: stored.arrayBuffer, source: "uploaded" };
+      if (!isValidOnnxBuffer(stored.arrayBuffer)) {
+        console.error(
+          `[yolo-inference] Stored model "${MODEL_ID}" is not a valid ONNX file ` +
+            `(${stored.arrayBuffer.byteLength} bytes). Ignoring it.`
+        );
+      } else {
+        return { bytes: stored.arrayBuffer, source: "uploaded" };
+      }
     }
   } catch {
     // IndexedDB error — fall through
@@ -92,7 +171,14 @@ async function fetchModelBytes(): Promise<{ bytes: ArrayBuffer; source: ModelLoa
     const resp = await fetch(BUNDLED_MODEL_URL);
     if (resp.ok) {
       const bytes = await resp.arrayBuffer();
-      return { bytes, source: "bundled" };
+      if (!isValidOnnxBuffer(bytes)) {
+        console.error(
+          `[yolo-inference] Bundled model at ${BUNDLED_MODEL_URL} is not a valid ` +
+            `ONNX file (${bytes.byteLength} bytes) — placeholder or LFS pointer?`
+        );
+      } else {
+        return { bytes, source: "bundled" };
+      }
     }
   } catch {
     // File not found
@@ -302,14 +388,9 @@ export async function isModelAvailable(): Promise<boolean> {
   } catch {
     // Fall through
   }
-  // 2. Check bundled static asset
-  try {
-    const resp = await fetch(BUNDLED_MODEL_URL, { method: "HEAD" });
-    if (resp.ok) return true;
-  } catch {
-    // Not available
-  }
-  return false;
+  // 2. Check bundled static asset (validates ONNX magic + size, not just 200 OK)
+  const probe = await probeBundledModel();
+  return probe.valid;
 }
 
 /** Get the model status message */
@@ -339,16 +420,10 @@ export async function getModelStatus(): Promise<{
     };
   }
 
-  // 2. Check bundled static asset
-  let bundledAvailable = false;
-  try {
-    const resp = await fetch(BUNDLED_MODEL_URL, { method: "HEAD" });
-    bundledAvailable = resp.ok;
-  } catch {
-    // Not available
-  }
+  // 2. Check bundled static asset (validates ONNX magic + size, not just 200 OK)
+  const probe = await probeBundledModel();
 
-  if (bundledAvailable) {
+  if (probe.valid) {
     return {
       available: true,
       message: "AI model loaded",
@@ -361,17 +436,31 @@ export async function getModelStatus(): Promise<{
     };
   }
 
+  const placeholderDetails =
+    probe.reachable && probe.totalBytes > 0 && probe.totalBytes < MIN_MODEL_BYTES
+      ? [
+          `A file exists at ${BUNDLED_MODEL_URL} but it is only`,
+          `${probe.totalBytes} bytes — not a valid ONNX model.`,
+          "",
+          "This is usually an un-materialized Git LFS pointer.",
+          "",
+          "Fix: pull the real model bytes into the repository, e.g.",
+          "  git lfs pull --include public/models/road-yolov8.onnx",
+          "so the full model file (≈44 MB) is served at that URL.",
+        ]
+      : [
+          "The road defect detection model could not be loaded.",
+          "",
+          `Expected location: ${BUNDLED_MODEL_URL}`,
+          "",
+          "The model file must be present as a bundled application asset.",
+          "Contact the administrator to restore the model file.",
+        ];
+
   return {
     available: false,
     message: "AI model unavailable",
-    details: [
-      "The road defect detection model could not be loaded.",
-      "",
-      "Expected location: /models/road-yolov8.onnx",
-      "",
-      "The model file must be present as a bundled application asset.",
-      "Contact the administrator to restore the model file.",
-    ],
+    details: placeholderDetails,
   };
 }
 
