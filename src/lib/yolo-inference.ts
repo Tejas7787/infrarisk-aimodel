@@ -1,16 +1,17 @@
 /**
- * YOLOv8 Inference Engine for Road Defect Detection
+ * YOLOv8 Inference Engine — multi-model support for infrastructure defect detection
  *
- * Runs a YOLOv8 ONNX model in the browser via ONNX Runtime Web (WASM backend).
- * Targets the RDD2022 road-damage dataset class labels.
+ * Runs YOLOv8 ONNX models in the browser via ONNX Runtime Web (WASM backend).
+ * Supports pluggable model configs for different infrastructure types:
+ *
+ *   Road:    /models/road-yolov8.onnx   — RDD2022-trained, 4 road-damage classes
+ *   Bridge:  /models/bridge-yolov8.onnx — Crack detection, 1 class
  *
  * Model loading:
- *   The ONNX model is bundled as a static application asset at:
- *     /models/road-yolov8.onnx
- *   It loads automatically on first inference — no user upload required.
+ *   Each model is bundled as a static application asset and loads automatically
+ *   on first inference — no user upload required.
  *
- *   An IndexedDB override allows power users to load a custom model.
- *   This is hidden from the normal UI flow.
+ *   An IndexedDB override allows power users to load custom models.
  *
  * Model requirements:
  *   - Format: YOLOv8 ONNX export (opset 12+, dynamic or fixed input)
@@ -19,12 +20,35 @@
  */
 
 import * as ort from "onnxruntime-web";
-import { loadModel as loadFromIDB, isModelStored, ROAD_MODEL_ID as MODEL_ID } from "./model-storage";
+import {
+  loadModel as loadFromIDB,
+  isModelStored,
+  ROAD_MODEL_ID,
+  BRIDGE_MODEL_ID,
+} from "./model-storage";
 
 // ---------------------------------------------------------------------------
-// RDD2022 class labels (4-class road damage detection)
+// Model configuration — each infrastructure type gets its own config
+// ---------------------------------------------------------------------------
+
+export interface ModelConfig {
+  /** Unique identifier for this model (matches model-storage IDs) */
+  id: string;
+  /** Path to the bundled ONNX model asset */
+  bundledUrl: string;
+  /** Human-readable class labels indexed by class ID */
+  classNames: readonly string[];
+  /** Human-friendly display names for each class */
+  labels: Record<string, string>;
+  /** Internal machine-readable names for each class */
+  internalNames: Record<string, string>;
+}
+
+// ---------------------------------------------------------------------------
+// RDD2022 road-damage classes (4-class road damage detection)
 // https://github.com/ai4civilengineering/RDD2022
 // ---------------------------------------------------------------------------
+
 export const RDD2022_CLASSES = [
   "D00", // Longitudinal crack
   "D10", // Transverse crack
@@ -48,17 +72,33 @@ export const RDD2022_INTERNAL_NAMES: Record<RDD2022Class, string> = {
   D40: "pothole",
 };
 
+/** Road model configuration (RDD2022-trained YOLOv8s, 4 classes) */
+export const ROAD_MODEL_CONFIG: ModelConfig = {
+  id: ROAD_MODEL_ID,
+  bundledUrl: "/models/road-yolov8.onnx",
+  classNames: RDD2022_CLASSES,
+  labels: RDD2022_LABELS,
+  internalNames: RDD2022_INTERNAL_NAMES,
+};
+
+/** Bridge model configuration (YOLOv8n crack detection, 1 class) */
+export const BRIDGE_MODEL_CONFIG: ModelConfig = {
+  id: BRIDGE_MODEL_ID,
+  bundledUrl: "/models/bridge-yolov8.onnx",
+  classNames: ["crack"],
+  labels: { crack: "Crack" },
+  internalNames: { crack: "crack" },
+};
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
+
 const MODEL_SIZE = 640; // YOLOv8 default input size
 const CONFIDENCE_THRESHOLD = 0.25;
 const IOU_THRESHOLD = 0.45;
 
-// Permanent bundled model path (served as a static asset from public/)
-const BUNDLED_MODEL_URL = "/models/road-yolov8.onnx";
-
-// A real YOLOv8s ONNX model is tens of MB. Anything below this is a placeholder
+// A real YOLOv8 ONNX model is tens of MB. Anything below this is a placeholder
 // (e.g. an un-materialized Git LFS pointer, which is ~133 bytes) — detect it so
 // the UI reports "AI model unavailable" instead of a false "AI model loaded".
 const MIN_MODEL_BYTES = 1024 * 1024; // 1 MB
@@ -68,7 +108,7 @@ const MIN_MODEL_BYTES = 1024 * 1024; // 1 MB
  * ONNX files start with field 1 (ir_version) varint: byte 0x08 followed by a
  * small version number (e.g. 08 07 = ONNX opset IR v7, emitted by PyTorch).
  * Combined with the minimum size, this reliably rejects HTML error pages and
- * Git LFS pointer files ("version https://git-lfs.github.com/spec/v1\n...").
+ * Git LFS pointer files.
  */
 function isValidOnnxBuffer(buffer: ArrayBuffer): boolean {
   if (buffer.byteLength < MIN_MODEL_BYTES) return false;
@@ -77,18 +117,20 @@ function isValidOnnxBuffer(buffer: ArrayBuffer): boolean {
 }
 
 /**
- * Lightweight probe of the bundled model file that does NOT download the full
+ * Lightweight probe of a bundled model file that does NOT download the full
  * body: requests only the first 16 bytes via HTTP Range and validates the ONNX
  * magic bytes plus the declared total size. Falls back to just checking the
  * declared size when the server ignores the Range header.
  */
-async function probeBundledModel(): Promise<{
+async function probeBundledModel(
+  modelUrl: string
+): Promise<{
   valid: boolean;
   reachable: boolean;
   totalBytes: number;
 }> {
   try {
-    const resp = await fetch(BUNDLED_MODEL_URL, {
+    const resp = await fetch(modelUrl, {
       headers: { Range: "bytes=0-15" },
     });
     if (!resp.ok) return { valid: false, reachable: false, totalBytes: 0 };
@@ -103,8 +145,7 @@ async function probeBundledModel(): Promise<{
       totalBytes = Number(resp.headers.get("content-length") ?? "0");
     }
 
-    // Read only the first chunk of the body, then cancel the stream — the
-    // server may ignore Range and return the full 44 MB response.
+    // Read only the first chunk of the body, then cancel the stream
     const reader = resp.body?.getReader();
     if (reader) {
       try {
@@ -133,9 +174,10 @@ async function probeBundledModel(): Promise<{
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
 export interface RawDetection {
   classId: number;
-  className: RDD2022Class;
+  className: string;
   confidence: number;
   bbox: { x: number; y: number; width: number; height: number }; // pixels in original image
 }
@@ -143,19 +185,23 @@ export interface RawDetection {
 export type ModelLoadSource = "bundled" | "uploaded" | "none";
 
 // ---------------------------------------------------------------------------
-// Model singleton
+// Per-model session management
 // ---------------------------------------------------------------------------
-let sessionPromise: Promise<ort.InferenceSession> | null = null;
-let loadedSource: ModelLoadSource = "none";
 
-async function fetchModelBytes(): Promise<{ bytes: ArrayBuffer; source: ModelLoadSource }> {
+const sessionMap = new Map<string, Promise<ort.InferenceSession>>();
+const loadedSourceMap = new Map<string, ModelLoadSource>();
+
+async function fetchModelBytes(config: ModelConfig): Promise<{
+  bytes: ArrayBuffer;
+  source: ModelLoadSource;
+}> {
   // 1. Try IndexedDB override (power user uploaded a custom model)
   try {
-    const stored = await loadFromIDB(MODEL_ID);
+    const stored = await loadFromIDB(config.id);
     if (stored?.arrayBuffer) {
       if (!isValidOnnxBuffer(stored.arrayBuffer)) {
         console.error(
-          `[yolo-inference] Stored model "${MODEL_ID}" is not a valid ONNX file ` +
+          `[yolo-inference] Stored model "${config.id}" is not a valid ONNX file ` +
             `(${stored.arrayBuffer.byteLength} bytes). Ignoring it.`
         );
       } else {
@@ -168,12 +214,12 @@ async function fetchModelBytes(): Promise<{ bytes: ArrayBuffer; source: ModelLoa
 
   // 2. Load bundled static asset (the permanent default)
   try {
-    const resp = await fetch(BUNDLED_MODEL_URL);
+    const resp = await fetch(config.bundledUrl);
     if (resp.ok) {
       const bytes = await resp.arrayBuffer();
       if (!isValidOnnxBuffer(bytes)) {
         console.error(
-          `[yolo-inference] Bundled model at ${BUNDLED_MODEL_URL} is not a valid ` +
+          `[yolo-inference] Bundled model at ${config.bundledUrl} is not a valid ` +
             `ONNX file (${bytes.byteLength} bytes) — placeholder or LFS pointer?`
         );
       } else {
@@ -187,48 +233,47 @@ async function fetchModelBytes(): Promise<{ bytes: ArrayBuffer; source: ModelLoa
   throw new Error("MODEL_NOT_CONNECTED");
 }
 
-async function getModelSession(): Promise<ort.InferenceSession> {
-  if (!sessionPromise) {
-    sessionPromise = (async () => {
-      const { bytes, source } = await fetchModelBytes();
-      loadedSource = source;
+async function getModelSessionForConfig(
+  config: ModelConfig
+): Promise<ort.InferenceSession> {
+  const existing = sessionMap.get(config.id);
+  if (existing) return existing;
 
-      // Point ONNX Runtime at its WASM backend files.
-      //
-      // In a Vite dev server, dynamic import() of .mjs files from public/ort/
-      // is intercepted by Vite's module system, which returns the SPA fallback
-      // HTML instead of the actual file — causing "no available backend found"
-      // and WebAssembly.instantiate() HTML-parse errors.
-      //
-      // Using the jsdelivr CDN bypasses Vite entirely. The CDN serves correct
-      // MIME types and CORS headers. The local public/ort/ files are kept as a
-      // fallback reference but are not used at runtime.
-      ort.env.wasm.wasmPaths =
-        "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/";
-      // Force single-threading: SharedArrayBuffer requires cross-origin isolation
-      // headers (COOP/COEP) which may not be present in the dev server.
-      ort.env.wasm.numThreads = 1;
+  const promise = (async () => {
+    const { bytes, source } = await fetchModelBytes(config);
+    loadedSourceMap.set(config.id, source);
 
-      const session = await ort.InferenceSession.create(bytes, {
-        executionProviders: ["wasm"],
-        graphOptimizationLevel: "all",
-      });
+    // Point ONNX Runtime at its WASM backend files via CDN
+    // (bypasses Vite's module interception of local public/ort/ files)
+    ort.env.wasm.wasmPaths =
+      "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/";
+    // Force single-threading: SharedArrayBuffer requires cross-origin isolation
+    // headers (COOP/COEP) which may not be present in the dev server.
+    ort.env.wasm.numThreads = 1;
 
-      return session;
-    })();
-
-    // Reset on failure so next attempt retries
-    sessionPromise.catch(() => {
-      sessionPromise = null;
-      loadedSource = "none";
+    const session = await ort.InferenceSession.create(bytes, {
+      executionProviders: ["wasm"],
+      graphOptimizationLevel: "all",
     });
-  }
-  return sessionPromise;
+
+    return session;
+  })();
+
+  sessionMap.set(config.id, promise);
+
+  // Reset on failure so next attempt retries
+  promise.catch(() => {
+    sessionMap.delete(config.id);
+    loadedSourceMap.delete(config.id);
+  });
+
+  return promise;
 }
 
 // ---------------------------------------------------------------------------
 // Image preprocessing: resize + normalize to NCHW float32
 // ---------------------------------------------------------------------------
+
 function preprocessImage(
   imageSource: HTMLImageElement | HTMLCanvasElement,
   targetSize: number
@@ -242,12 +287,14 @@ function preprocessImage(
   ctx.fillStyle = "#808080";
   ctx.fillRect(0, 0, targetSize, targetSize);
 
-  const srcW = imageSource instanceof HTMLImageElement
-    ? imageSource.naturalWidth
-    : imageSource.width;
-  const srcH = imageSource instanceof HTMLImageElement
-    ? imageSource.naturalHeight
-    : imageSource.height;
+  const srcW =
+    imageSource instanceof HTMLImageElement
+      ? imageSource.naturalWidth
+      : imageSource.width;
+  const srcH =
+    imageSource instanceof HTMLImageElement
+      ? imageSource.naturalHeight
+      : imageSource.height;
 
   const scale = Math.min(targetSize / srcW, targetSize / srcH);
   const newW = srcW * scale;
@@ -278,6 +325,7 @@ function preprocessImage(
 // ---------------------------------------------------------------------------
 // Non-Maximum Suppression
 // ---------------------------------------------------------------------------
+
 function computeIoU(
   a: { x: number; y: number; width: number; height: number },
   b: { x: number; y: number; width: number; height: number }
@@ -320,19 +368,21 @@ function nms(detections: RawDetection[], iouThreshold: number): RawDetection[] {
 // ---------------------------------------------------------------------------
 // Post-processing: extract detections from YOLOv8 raw output
 // ---------------------------------------------------------------------------
+
 function postprocess(
   outputTensor: ort.Tensor,
   pad: { padX: number; padY: number; scale: number },
   origW: number,
   origH: number,
   confThreshold: number,
-  iouThreshold: number
+  iouThreshold: number,
+  classNames: readonly string[]
 ): RawDetection[] {
   const data = outputTensor.data as Float32Array;
   const shape = outputTensor.dims;
 
   // YOLOv8 output: [1, 4 + numClasses, numDetections]
-  const numClasses = RDD2022_CLASSES.length;
+  const numClasses = classNames.length;
   const numDetections = shape[2];
 
   const raw: RawDetection[] = [];
@@ -371,7 +421,7 @@ function postprocess(
 
     raw.push({
       classId: bestClass,
-      className: RDD2022_CLASSES[bestClass],
+      className: classNames[bestClass],
       confidence: bestScore,
       bbox: { x: x1, y: y1, width: x2 - x1, height: y2 - y1 },
     });
@@ -381,32 +431,37 @@ function postprocess(
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Public API — model availability and status
 // ---------------------------------------------------------------------------
 
-/** Check if the model is available (bundled or uploaded) */
-export async function isModelAvailable(): Promise<boolean> {
+/** Check if a specific model is available (bundled or uploaded) */
+export async function isModelAvailable(config?: ModelConfig): Promise<boolean> {
+  const cfg = config ?? ROAD_MODEL_CONFIG;
   // 1. Check IndexedDB override
   try {
-    if (await isModelStored(MODEL_ID)) return true;
+    if (await isModelStored(cfg.id)) return true;
   } catch {
     // Fall through
   }
   // 2. Check bundled static asset (validates ONNX magic + size, not just 200 OK)
-  const probe = await probeBundledModel();
+  const probe = await probeBundledModel(cfg.bundledUrl);
   return probe.valid;
 }
 
-/** Get the model status message */
-export async function getModelStatus(): Promise<{
+/** Get the status message for a specific model */
+export async function getModelStatus(
+  config?: ModelConfig
+): Promise<{
   available: boolean;
   message: string;
   details: string[];
 }> {
+  const cfg = config ?? ROAD_MODEL_CONFIG;
+
   // 1. Check IndexedDB override
   let uploadedAvailable = false;
   try {
-    uploadedAvailable = await isModelStored(MODEL_ID);
+    uploadedAvailable = await isModelStored(cfg.id);
   } catch {
     // Not available
   }
@@ -416,25 +471,23 @@ export async function getModelStatus(): Promise<{
       available: true,
       message: "AI model loaded (custom)",
       details: [
-        "YOLOv8 ONNX model loaded from browser storage",
-        "Classes: Longitudinal Crack (D00), Transverse Crack (D10),",
-        "         Alligator/Fatigue Crack (D20), Pothole (D40)",
+        `YOLOv8 ONNX model loaded from browser storage`,
+        `Classes: ${Object.values(cfg.labels).join(", ")}`,
         "Runtime: ONNX Runtime Web (WASM)",
       ],
     };
   }
 
-  // 2. Check bundled static asset (validates ONNX magic + size, not just 200 OK)
-  const probe = await probeBundledModel();
+  // 2. Check bundled static asset
+  const probe = await probeBundledModel(cfg.bundledUrl);
 
   if (probe.valid) {
     return {
       available: true,
       message: "AI model loaded",
       details: [
-        "YOLOv8 ONNX model (RDD2022 road-damage, 4 classes)",
-        "Classes: Longitudinal Crack (D00), Transverse Crack (D10),",
-        "         Alligator/Fatigue Crack (D20), Pothole (D40)",
+        `YOLOv8 ONNX model (${cfg.classNames.length} class${cfg.classNames.length > 1 ? "es" : ""})`,
+        `Classes: ${Object.values(cfg.labels).join(", ")}`,
         "Runtime: ONNX Runtime Web (WASM)",
       ],
     };
@@ -443,19 +496,19 @@ export async function getModelStatus(): Promise<{
   const placeholderDetails =
     probe.reachable && probe.totalBytes > 0 && probe.totalBytes < MIN_MODEL_BYTES
       ? [
-          `A file exists at ${BUNDLED_MODEL_URL} but it is only`,
+          `A file exists at ${cfg.bundledUrl} but it is only`,
           `${probe.totalBytes} bytes — not a valid ONNX model.`,
           "",
           "This is usually an un-materialized Git LFS pointer.",
           "",
           "Fix: pull the real model bytes into the repository, e.g.",
-          "  git lfs pull --include public/models/road-yolov8.onnx",
-          "so the full model file (≈44 MB) is served at that URL.",
+          `  git lfs pull --include ${cfg.bundledUrl}`,
+          "so the full model file is served at that URL.",
         ]
       : [
-          "The road defect detection model could not be loaded.",
+          "The defect detection model could not be loaded.",
           "",
-          `Expected location: ${BUNDLED_MODEL_URL}`,
+          `Expected location: ${cfg.bundledUrl}`,
           "",
           "The model file must be present as a bundled application asset.",
           "Contact the administrator to restore the model file.",
@@ -468,21 +521,29 @@ export async function getModelStatus(): Promise<{
   };
 }
 
+// ---------------------------------------------------------------------------
+// Public API — inference
+// ---------------------------------------------------------------------------
+
 /**
- * Run YOLOv8 inference on an image element.
+ * Run YOLOv8 inference on an image element for a specific model config.
  * Returns raw detections before severity/risk scoring.
  */
 export async function runInference(
-  imageSource: HTMLImageElement | HTMLCanvasElement
+  imageSource: HTMLImageElement | HTMLCanvasElement,
+  config?: ModelConfig
 ): Promise<RawDetection[]> {
-  const session = await getModelSession();
+  const cfg = config ?? ROAD_MODEL_CONFIG;
+  const session = await getModelSessionForConfig(cfg);
 
-  const origW = imageSource instanceof HTMLImageElement
-    ? imageSource.naturalWidth
-    : imageSource.width;
-  const origH = imageSource instanceof HTMLImageElement
-    ? imageSource.naturalHeight
-    : imageSource.height;
+  const origW =
+    imageSource instanceof HTMLImageElement
+      ? imageSource.naturalWidth
+      : imageSource.width;
+  const origH =
+    imageSource instanceof HTMLImageElement
+      ? imageSource.naturalHeight
+      : imageSource.height;
 
   // Preprocess
   const { tensor, pad } = preprocessImage(imageSource, MODEL_SIZE);
@@ -500,22 +561,25 @@ export async function runInference(
     origW,
     origH,
     CONFIDENCE_THRESHOLD,
-    IOU_THRESHOLD
+    IOU_THRESHOLD,
+    cfg.classNames
   );
 
   return detections;
 }
 
-/** Get the source the model was loaded from (after first inference) */
-export function getLoadedSource(): ModelLoadSource {
-  return loadedSource;
+/** Get the source a specific model was loaded from (after first inference) */
+export function getLoadedSource(config?: ModelConfig): ModelLoadSource {
+  const cfg = config ?? ROAD_MODEL_CONFIG;
+  return loadedSourceMap.get(cfg.id) ?? "none";
 }
 
 /**
- * Invalidate the cached model session.
+ * Invalidate the cached model session for a specific model.
  * Call this after uploading a custom model to force reload.
  */
-export function invalidateModelCache(): void {
-  sessionPromise = null;
-  loadedSource = "none";
+export function invalidateModelCache(config?: ModelConfig): void {
+  const cfg = config ?? ROAD_MODEL_CONFIG;
+  sessionMap.delete(cfg.id);
+  loadedSourceMap.delete(cfg.id);
 }

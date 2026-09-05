@@ -7,11 +7,12 @@
  *             D20 (Alligator Crack), D40 (Pothole)
  *   - Runs entirely in the browser, no external API required
  *
- * Bridge images: Hugging Face DETR-ResNet-50 (COCO, 80 classes).
- *   - Loads from Hugging Face Hub via Transformers.js
- *   - Detects general objects relevant to bridge assessment
+ * Bridge images: YOLOv8 ONNX model via ONNX Runtime Web.
+ *   - Loads from /models/bridge-yolov8.onnx (must be present)
+ *   - Detects: Crack
+ *   - Runs entirely in the browser, no external API required
  *
- * If the road ONNX model file is missing, the UI clearly states
+ * If an ONNX model file is missing, the UI clearly states
  * "Real AI model not connected" — no fake results are generated.
  */
 
@@ -29,13 +30,11 @@ import {
   invalidateModelCache,
   RDD2022_INTERNAL_NAMES,
   RDD2022_LABELS,
+  ROAD_MODEL_CONFIG,
+  BRIDGE_MODEL_CONFIG,
+  type ModelConfig,
   type RawDetection,
 } from "./yolo-inference";
-import {
-  runHFInference,
-  getHFModelStatus,
-  type InfraDetection,
-} from "./hf-inference";
 
 export interface DetectedDefect {
   defectType: string;
@@ -96,17 +95,20 @@ function estimateRoadSeverity(
 async function analyzeRoad(
   imageEl: HTMLImageElement
 ): Promise<{ defects: DetectedDefect[]; details: string[] }> {
-  const modelAvailable = await isModelAvailable();
+  const modelAvailable = await isModelAvailable(ROAD_MODEL_CONFIG);
   if (!modelAvailable) {
     throw new Error("MODEL_NOT_CONNECTED");
   }
 
-  const rawDetections = await runInference(imageEl);
+  const rawDetections = await runInference(imageEl, ROAD_MODEL_CONFIG);
   const imageArea = imageEl.naturalWidth * imageEl.naturalHeight;
 
   const defects: DetectedDefect[] = rawDetections.map((det: RawDetection) => {
-    const internalName = RDD2022_INTERNAL_NAMES[det.className] ?? det.className;
+    const internalName = RDD2022_INTERNAL_NAMES[det.className as keyof typeof RDD2022_INTERNAL_NAMES] ?? det.className;
     const bboxArea = det.bbox.width * det.bbox.height;
+
+    const label =
+      RDD2022_LABELS[det.className as keyof typeof RDD2022_LABELS] ?? det.className;
 
     return {
       defectType: internalName,
@@ -116,12 +118,12 @@ async function analyzeRoad(
       bboxY: Math.round(det.bbox.y),
       bboxWidth: Math.round(det.bbox.width),
       bboxHeight: Math.round(det.bbox.height),
-      description: `${RDD2022_LABELS[det.className]} detected with ${(det.confidence * 100).toFixed(1)}% confidence.`,
+      description: `${label} detected with ${(det.confidence * 100).toFixed(1)}% confidence.`,
     };
   });
 
   const detectedClasses = [...new Set(defects.map((d) => d.defectType))];
-  const source = getLoadedSource();
+  const source = getLoadedSource(ROAD_MODEL_CONFIG);
   const sourceLabel = source === "uploaded" ? "Custom (browser storage)" : "Bundled application asset";
   const details: string[] = [
     `Model: YOLOv8s (RDD2022 road-damage, 4 classes)`,
@@ -135,37 +137,26 @@ async function analyzeRoad(
 }
 
 // ---------------------------------------------------------------------------
-// Bridge analysis: Hugging Face DETR (COCO)
+// Bridge analysis: YOLOv8 ONNX (crack detection)
 // ---------------------------------------------------------------------------
 
-const BRIDGE_CATEGORY_SEVERITY: Record<string, SeverityLevel> = {
-  hazard: "high",
-  safety: "medium",
-  usage: "low",
-  infrastructure: "low",
-  surface: "medium",
-  general: "low",
-};
-
+/** Severity estimation for bridge crack detections */
 function estimateBridgeSeverity(
-  defectType: string,
-  category: string,
   confidence: number,
   bboxArea: number,
   imageArea: number
 ): SeverityLevel {
   const severityOrder: SeverityLevel[] = ["low", "medium", "high", "critical"];
-  const base = BRIDGE_CATEGORY_SEVERITY[category] ?? "low";
-  let idx = severityOrder.indexOf(base);
+  let idx = 0; // start at "low"
 
-  if (confidence > 0.85) idx = Math.min(idx + 1, 3);
-  if (confidence > 0.95) idx = Math.min(idx + 1, 3);
+  // High confidence elevates severity
+  if (confidence > 0.85) idx = Math.min(idx + 1, 3); // → medium
+  if (confidence > 0.95) idx = Math.min(idx + 1, 3); // → high
 
+  // Large crack relative to image elevates severity
   const areaRatio = bboxArea / imageArea;
-  if (areaRatio > 0.15) idx = Math.min(idx + 1, 3);
-  if (areaRatio > 0.3) idx = Math.min(idx + 1, 3);
-
-  if (defectType === "heavy_traffic_evidence") idx = Math.min(idx + 1, 3);
+  if (areaRatio > 0.1) idx = Math.min(idx + 1, 3);
+  if (areaRatio > 0.25) idx = Math.min(idx + 1, 3);
 
   return severityOrder[Math.min(idx, 3)];
 }
@@ -173,60 +164,42 @@ function estimateBridgeSeverity(
 async function analyzeBridge(
   imageEl: HTMLImageElement
 ): Promise<{ defects: DetectedDefect[]; details: string[] }> {
-  const result = await runHFInference(imageEl);
+  const modelAvailable = await isModelAvailable(BRIDGE_MODEL_CONFIG);
+  if (!modelAvailable) {
+    throw new Error("MODEL_NOT_CONNECTED");
+  }
+
+  const rawDetections = await runInference(imageEl, BRIDGE_MODEL_CONFIG);
   const imageArea = imageEl.naturalWidth * imageEl.naturalHeight;
 
-  const defects: DetectedDefect[] = result.detections.map((det: InfraDetection) => {
-    const bboxArea = det.bboxWidth * det.bboxHeight;
+  const defects: DetectedDefect[] = rawDetections.map((det: RawDetection) => {
+    const bboxArea = det.bbox.width * det.bbox.height;
+    const label =
+      BRIDGE_MODEL_CONFIG.labels[det.className] ?? det.className;
+
     return {
-      defectType: det.defectType,
+      defectType: "crack", // bridge model detects cracks
       confidence: det.confidence,
-      severity: estimateBridgeSeverity(
-        det.defectType,
-        det.category,
-        det.confidence,
-        bboxArea,
-        imageArea
-      ),
-      bboxX: det.bboxX,
-      bboxY: det.bboxY,
-      bboxWidth: det.bboxWidth,
-      bboxHeight: det.bboxHeight,
-      description: buildBridgeDetectionDescription(det),
+      severity: estimateBridgeSeverity(det.confidence, bboxArea, imageArea),
+      bboxX: Math.round(det.bbox.x),
+      bboxY: Math.round(det.bbox.y),
+      bboxWidth: Math.round(det.bbox.width),
+      bboxHeight: Math.round(det.bbox.height),
+      description: `${label} detected with ${(det.confidence * 100).toFixed(1)}% confidence.`,
     };
   });
 
+  const source = getLoadedSource(BRIDGE_MODEL_CONFIG);
+  const sourceLabel = source === "uploaded" ? "Custom (browser storage)" : "Bundled application asset";
   const details: string[] = [
-    `Model: DETR-ResNet-50 (facebook/detr-resnet-50, COCO 80 classes)`,
-    `Runtime: ONNX Runtime Web (WASM, loaded from Hugging Face Hub)`,
+    `Model: YOLOv8n (crack detection, 1 class)`,
+    `Source: ${sourceLabel}`,
     `Input: ${imageEl.naturalWidth}×${imageEl.naturalHeight}px`,
-    `Raw detections: ${result.rawCount}`,
-    `Filtered (≥0.3): ${result.detections.length}`,
-    `Classes found: ${[...new Set(result.detections.map((d) => d.label))].join(", ") || "none"}`,
-    ``,
-    `Note: This COCO model detects general objects. A bridge-specific`,
-    `model trained on GYU-DET would improve defect detection.`,
+    `Detections (post-NMS): ${rawDetections.length}`,
+    `Classes detected: ${defects.length > 0 ? "Crack" : "none"}`,
   ];
 
   return { defects, details };
-}
-
-function buildBridgeDetectionDescription(det: InfraDetection): string {
-  const confidence = `${(det.confidence * 100).toFixed(0)}%`;
-  switch (det.category) {
-    case "usage":
-      return `Detected ${det.label} (${confidence}). Indicates bridge usage and traffic load.`;
-    case "safety":
-      return `Detected ${det.label} (${confidence}). Safety-relevant presence on the bridge.`;
-    case "hazard":
-      return `Detected ${det.label} (${confidence}). Potential hazard or construction zone indicator.`;
-    case "infrastructure":
-      return `Detected ${det.label} (${confidence}). Infrastructure element on the bridge.`;
-    case "surface":
-      return `Detected ${det.label} (${confidence}). Possible surface-level item or debris.`;
-    default:
-      return `Detected ${det.label} (${confidence}). Object observed in the bridge environment.`;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -281,12 +254,11 @@ export async function analyzeInfrastructure(
         defects: result.defects,
         risk,
         processingTimeMs: Date.now() - startTime,
-        modelVersion: "detr-resnet-50-coco-v1",
+        modelVersion: "yolov8n-bridge-crack-v1",
         modelNote:
-          "This analysis uses a COCO-pretrained DETR model running in the browser. " +
-          "The model detects general objects relevant to bridge assessment. " +
-          "Results should be verified by a qualified infrastructure professional. " +
-          "For bridge-specific defect detection, a model trained on GYU-DET is recommended.",
+          "This analysis uses a YOLOv8n model for bridge crack detection, " +
+          "running in the browser via ONNX Runtime Web. " +
+          "Results should be verified by a qualified infrastructure professional.",
         modelConnected: true,
         inferenceDetails: result.details,
       };
@@ -331,15 +303,19 @@ function getModelNotConnectedDetails(
   }
 
   if (infraType === "bridge") {
-    return [
-      "Bridge analysis requires Hugging Face model loading.",
-      "",
-      "The DETR model loads from Hugging Face Hub on first use.",
-      "Check your internet connection and try again.",
-      "",
-      "For offline bridge analysis, train a model on GYU-DET",
-      "and add an inference adapter.",
-    ];
+    if (errorMsg === "MODEL_NOT_CONNECTED") {
+      return [
+        "AI model unavailable.",
+        "",
+        "The bridge crack detection model could not be loaded.",
+        "",
+        "Expected location: /models/bridge-yolov8.onnx",
+        "",
+        "The ONNX model file must be present as a bundled application asset.",
+        "Contact the administrator to restore the model file.",
+      ];
+    }
+    return [`Bridge analysis error: ${errorMsg}`];
   }
 
   return [
@@ -347,23 +323,37 @@ function getModelNotConnectedDetails(
     "",
     "Currently supported infrastructure types:",
     "  - Road: YOLOv8s (RDD2022-trained, ONNX model required)",
-    "  - Bridge: DETR-ResNet-50 (loaded from Hugging Face Hub)",
+    "  - Bridge: YOLOv8n (crack detection, ONNX model required)",
   ];
 }
 
 // ---------------------------------------------------------------------------
-// Model status (road model)
+// Model status — checks both road and bridge models
 // ---------------------------------------------------------------------------
 
+export async function getModelStatuses(): Promise<{
+  road: Awaited<ReturnType<typeof getModelStatus>>;
+  bridge: Awaited<ReturnType<typeof getModelStatus>>;
+}> {
+  const [road, bridge] = await Promise.all([
+    getModelStatus(ROAD_MODEL_CONFIG),
+    getModelStatus(BRIDGE_MODEL_CONFIG),
+  ]);
+  return { road, bridge };
+}
+
+/** Legacy: get only road model status (used by Inspect.tsx) */
 export async function getRoadModelStatus() {
-  return getModelStatus();
+  return getModelStatus(ROAD_MODEL_CONFIG);
+}
+
+/** Get bridge model status */
+export async function getBridgeModelStatus() {
+  return getModelStatus(BRIDGE_MODEL_CONFIG);
 }
 
 /** Force-reload model on next inference (call after uploading a new ONNX) */
 export { invalidateModelCache };
-
-// Re-export HF model status for bridge
-export { getHFModelStatus };
 
 // ---------------------------------------------------------------------------
 // Helpers

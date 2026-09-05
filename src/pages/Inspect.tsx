@@ -41,7 +41,7 @@ import {
 } from "@/lib/risk-engine";
 import {
   analyzeInfrastructure,
-  getRoadModelStatus,
+  getModelStatuses,
   type AnalysisResult,
 } from "@/lib/ai-service";
 import type { InfraType } from "@/lib/types";
@@ -75,15 +75,24 @@ export default function Inspect() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedInspectionId, setSavedInspectionId] = useState<string | null>(null);
 
-  // Model status (YOLOv8 ONNX for road)
-  const [modelStatus, setModelStatus] = useState<{
-    available: boolean;
-    message: string;
-    details: string[];
-  } | null>(null);
+  // Model status (YOLOv8 ONNX for road and bridge)
+  type ModelStatusInfo = { available: boolean; message: string; details: string[] };
+  const [modelStatuses, setModelStatuses] = useState<{
+    road: ModelStatusInfo | null;
+    bridge: ModelStatusInfo | null;
+  }>({ road: null, bridge: null });
+  const [statusesLoading, setStatusesLoading] = useState(true);
   useEffect(() => {
-    getRoadModelStatus().then(setModelStatus);
+    getModelStatuses().then((s) => {
+      setModelStatuses(s);
+      setStatusesLoading(false);
+    });
   }, []);
+
+  // Derive the current model status based on selected infra type
+  const currentModelStatus = infraType === "bridge"
+    ? modelStatuses.bridge
+    : modelStatuses.road;
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -349,59 +358,8 @@ export default function Inspect() {
         <div className="grid gap-5 md:gap-6 xl:grid-cols-[420px_1fr]">
           {/* Left: Config & Upload */}
           <div className="space-y-4 md:space-y-5">
-            {/* Model Status Card */}
-            {modelStatus && (
-              <div
-                className={`rounded-xl border p-4 ${
-                  modelStatus.available
-                    ? "border-risk-low/30 bg-risk-low/5"
-                    : "border-amber-500/20 bg-amber-500/5"
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div
-                    className={`flex size-8 items-center justify-center rounded-lg shrink-0 mt-0.5 ${
-                      modelStatus.available
-                        ? "bg-risk-low/10"
-                        : "bg-amber-500/10"
-                    }`}
-                  >
-                    {modelStatus.available ? (
-                      <CheckCircle2 className="size-4 text-risk-low" />
-                    ) : (
-                      <Plug className="size-4 text-amber-400" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p
-                      className={`text-sm font-semibold ${
-                        modelStatus.available
-                          ? "text-risk-low"
-                          : "text-amber-300"
-                      }`}
-                    >
-                      {modelStatus.message}
-                    </p>
-                    <div className="mt-2 space-y-0.5">
-                      {modelStatus.details.map((line, i) =>
-                        line ? (
-                          <p
-                            key={i}
-                            className="text-[11px] text-muted-foreground leading-relaxed"
-                          >
-                            {line}
-                          </p>
-                        ) : (
-                          <div key={i} className="h-1.5" />
-                        )
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {!modelStatus && (
+            {/* Model Status Cards */}
+            {statusesLoading && (
               <div className="rounded-xl border border-border/60 bg-card p-4">
                 <div className="flex items-center gap-3">
                   <Loader2 className="size-4 text-muted-foreground animate-spin" />
@@ -411,6 +369,74 @@ export default function Inspect() {
                 </div>
               </div>
             )}
+
+            {!statusesLoading && [
+              { key: "road" as const, label: "Road", status: modelStatuses.road },
+              { key: "bridge" as const, label: "Bridge", status: modelStatuses.bridge },
+            ].map(({ key, label, status }) => {
+              if (!status) return null;
+              const isActive = key === infraType;
+              return (
+                <div
+                  key={key}
+                  className={`rounded-xl border p-4 transition-all duration-200 ${
+                    status.available
+                      ? isActive
+                        ? "border-risk-low/40 bg-risk-low/5 shadow-[0_0_12px_oklch(0.65_0.15_145_/_0.1)]"
+                        : "border-risk-low/20 bg-risk-low/[0.02]"
+                      : "border-amber-500/20 bg-amber-500/5"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`flex size-8 items-center justify-center rounded-lg shrink-0 mt-0.5 ${
+                        status.available
+                          ? "bg-risk-low/10"
+                          : "bg-amber-500/10"
+                      }`}
+                    >
+                      {status.available ? (
+                        <CheckCircle2 className="size-4 text-risk-low" />
+                      ) : (
+                        <Plug className="size-4 text-amber-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p
+                          className={`text-sm font-semibold ${
+                            status.available
+                              ? "text-risk-low"
+                              : "text-amber-300"
+                          }`}
+                        >
+                          {label}: {status.message}
+                        </p>
+                        {isActive && (
+                          <Badge className="text-[9px] bg-primary/10 text-primary border-0">
+                            Active
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="mt-2 space-y-0.5">
+                        {status.details.map((line, i) =>
+                          line ? (
+                            <p
+                              key={i}
+                              className="text-[11px] text-muted-foreground leading-relaxed"
+                            >
+                              {line}
+                            </p>
+                          ) : (
+                            <div key={i} className="h-1.5" />
+                          )
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
 
 
 
@@ -592,7 +618,7 @@ export default function Inspect() {
                     No analysis results
                   </h3>
                   <p className="mt-2 text-sm text-muted-foreground max-w-sm mx-auto leading-relaxed">
-                    {modelStatus?.available
+                    {currentModelStatus?.available
                       ? 'Select infrastructure type, upload an image, and click "Analyze with AI" to run real inference.'
                       : "Upload an image and select infrastructure type. The AI model must be loaded before analysis can run."}
                   </p>

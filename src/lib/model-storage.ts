@@ -162,3 +162,4 @@ export async function uploadModelFile(
 // ---------------------------------------------------------------------------
 
 export const ROAD_MODEL_ID = "road-yolov8";
+export const BRIDGE_MODEL_ID = "bridge-yolov8";
