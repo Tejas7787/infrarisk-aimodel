@@ -202,7 +202,34 @@ export default function Inspect() {
     setSavedInspectionId(null);
 
     try {
-      const imageData = await fileToDataUrl(selectedFile);
+      // Step 1: Read the file
+      let imageData: string;
+      try {
+        imageData = await fileToDataUrl(selectedFile);
+      } catch (readErr) {
+        const msg = readErr instanceof Error ? readErr.message : String(readErr);
+        setResult({
+          success: false,
+          defects: [],
+          risk: {
+            riskScore: 0,
+            riskCategory: "LOW",
+            priority: "P4",
+            explanation: "",
+            factors: [],
+            recommendedAction: "",
+            disclaimer: "",
+          },
+          processingTimeMs: 0,
+          modelVersion: "n/a",
+          modelNote: `Could not read the uploaded image file. ${msg}`,
+          modelConnected: false,
+          inferenceDetails: [msg],
+        });
+        return; // don't continue to analysis
+      }
+
+      // Step 2: Run AI analysis
       const analysisResult = await analyzeInfrastructure(
         infraType as InfraType,
         imageData,
@@ -211,11 +238,12 @@ export default function Inspect() {
 
       setResult(analysisResult);
 
-      // Save to Convex
+      // Step 3: Save to Convex (analysis succeeded or failed — save either way)
       if (user?._id) {
         await saveToConvex(analysisResult);
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
       setResult({
         success: false,
         defects: [],
@@ -230,11 +258,9 @@ export default function Inspect() {
         },
         processingTimeMs: 0,
         modelVersion: "n/a",
-        modelNote: err instanceof Error ? err.message : "Unknown error",
+        modelNote: msg,
         modelConnected: false,
-        inferenceDetails: [
-          `Analysis error: ${err instanceof Error ? err.message : "Unknown error"}`,
-        ],
+        inferenceDetails: [`Error: ${msg}`],
       });
     } finally {
       setIsAnalyzing(false);
@@ -909,7 +935,10 @@ function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.onerror = () => {
+      const detail = reader.error?.message || reader.error?.name || "unknown error";
+      reject(new Error(`Failed to read file: ${detail}`));
+    };
     reader.readAsDataURL(file);
   });
 }
