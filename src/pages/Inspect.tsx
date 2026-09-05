@@ -55,6 +55,7 @@ export default function Inspect() {
   // Convex mutations
   const generateUploadUrl = useMutation(api.upload.generateUploadUrl);
   const createAsset = useMutation(api.assets.create);
+  const createImage = useMutation(api.images.create);
   const createInspection = useMutation(api.inspections.create);
   const completeInspection = useMutation(api.inspections.complete);
   const failInspection = useMutation(api.inspections.fail);
@@ -123,11 +124,22 @@ export default function Inspect() {
         status: "inspection_required",
       });
 
+      // 2b. Create images record (inspections.imageId references the images table)
+      const imageRecordId = await createImage({
+        userId: user._id,
+        assetId: assetRecordId,
+        storageId,
+        fileName: selectedFile.name,
+        fileSize: selectedFile.size,
+        mimeType: selectedFile.type,
+        infraType,
+      });
+
       // 3. Create inspection record
       const inspectionId = await createInspection({
         userId: user._id,
         assetId: assetRecordId,
-        imageId: storageId,
+        imageId: imageRecordId,
         infraType,
         location: location || undefined,
         notes: notes || undefined,
