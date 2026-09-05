@@ -193,14 +193,18 @@ async function getModelSession(): Promise<ort.InferenceSession> {
       const { bytes, source } = await fetchModelBytes();
       loadedSource = source;
 
-      // Point ONNX Runtime at the WASM backend files served from public/ort/
-      // String form is required for ORT v1.29.0: the JSEP backend module URL is
-      // built as new URL("ort-wasm-simd-threaded.jsep.mjs", wasmPaths). With the
-      // object form, that base is undefined and the .mjs import resolves against
-      // the library's own bundle URL inside node_modules (never served), failing
-      // with "no available backend found". The object form's `mjs` key only
-      // affects the optional Web Worker proxy path, not this import.
-      ort.env.wasm.wasmPaths = "/ort/";
+      // Point ONNX Runtime at its WASM backend files.
+      //
+      // In a Vite dev server, dynamic import() of .mjs files from public/ort/
+      // is intercepted by Vite's module system, which returns the SPA fallback
+      // HTML instead of the actual file — causing "no available backend found"
+      // and WebAssembly.instantiate() HTML-parse errors.
+      //
+      // Using the jsdelivr CDN bypasses Vite entirely. The CDN serves correct
+      // MIME types and CORS headers. The local public/ort/ files are kept as a
+      // fallback reference but are not used at runtime.
+      ort.env.wasm.wasmPaths =
+        "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/";
       // Force single-threading: SharedArrayBuffer requires cross-origin isolation
       // headers (COOP/COEP) which may not be present in the dev server.
       ort.env.wasm.numThreads = 1;
