@@ -72,6 +72,7 @@ export default function Inspect() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [factorsExpanded, setFactorsExpanded] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [savedInspectionId, setSavedInspectionId] = useState<string | null>(null);
 
   // Model status (YOLOv8 ONNX for road)
@@ -103,18 +104,30 @@ export default function Inspect() {
     if (!user?._id || !selectedFile || !infraType) return;
 
     setSaveStatus("saving");
+    setSaveError(null);
 
+    let lastStep = "init";
     try {
       // 1. Upload image to Convex storage
+      lastStep = "1.upload";
+      console.log("[Save] Step 1: uploading image to Convex storage...");
       const uploadUrl = await generateUploadUrl();
       const uploadResponse = await fetch(uploadUrl, {
         method: "POST",
         headers: { "Content-Type": selectedFile.type },
         body: selectedFile,
       });
+      if (!uploadResponse.ok) {
+        const body = await uploadResponse.text().catch(() => "<no body>");
+        throw new Error(`Upload HTTP ${uploadResponse.status}: ${body}`);
+      }
       const { storageId } = await uploadResponse.json();
+      console.log("[Save] Step 1 OK: storageId =", storageId);
+      if (!storageId) throw new Error("Upload returned empty storageId");
 
-      // 2. Create or find asset
+      // 2. Create asset record
+      lastStep = "2.createAsset";
+      console.log("[Save] Step 2: creating asset...");
       const assetRecordId = await createAsset({
         userId: user._id,
         assetId: assetId || `AUTO-${Date.now()}`,
@@ -123,8 +136,11 @@ export default function Inspect() {
         notes: notes || undefined,
         status: "inspection_required",
       });
+      console.log("[Save] Step 2 OK: assetId =", assetRecordId);
 
-      // 2b. Create images record (inspections.imageId references the images table)
+      // 3. Create images record (inspections.imageId requires an images table doc ID)
+      lastStep = "3.createImage";
+      console.log("[Save] Step 3: creating image record...");
       const imageRecordId = await createImage({
         userId: user._id,
         assetId: assetRecordId,
@@ -134,8 +150,11 @@ export default function Inspect() {
         mimeType: selectedFile.type,
         infraType,
       });
+      console.log("[Save] Step 3 OK: imageRecordId =", imageRecordId);
 
-      // 3. Create inspection record
+      // 4. Create inspection record
+      lastStep = "4.createInspection";
+      console.log("[Save] Step 4: creating inspection...");
       const inspectionId = await createInspection({
         userId: user._id,
         assetId: assetRecordId,
@@ -144,24 +163,39 @@ export default function Inspect() {
         location: location || undefined,
         notes: notes || undefined,
       });
+      console.log("[Save] Step 4 OK: inspectionId =", inspectionId);
 
-      // 4. Save each detection
-      for (const defect of analysisResult.defects) {
+      // 5. Save each detection
+      lastStep = "5.createDetections";
+      console.log("[Save] Step 5: saving", analysisResult.defects.length, "detection(s)...");
+      for (let i = 0; i < analysisResult.defects.length; i++) {
+        const d = analysisResult.defects[i];
+        console.log(`[Save] Step 5: saving detection ${i + 1}/${analysisResult.defects.length}:`, d.defectType, d.severity, d.confidence);
         await createDetection({
           inspectionId,
           userId: user._id,
-          defectType: defect.defectType,
-          confidence: defect.confidence,
-          severity: defect.severity,
-          bboxX: defect.bboxX,
-          bboxY: defect.bboxY,
-          bboxWidth: defect.bboxWidth,
-          bboxHeight: defect.bboxHeight,
-          description: defect.description,
+          defectType: d.defectType,
+          confidence: d.confidence,
+          severity: d.severity,
+          bboxX: d.bboxX,
+          bboxY: d.bboxY,
+          bboxWidth: d.bboxWidth,
+          bboxHeight: d.bboxHeight,
+          description: d.description,
         });
+        console.log(`[Save] Step 5: detection ${i + 1} saved`);
       }
+      console.log("[Save] Step 5 OK: all detections saved");
 
-      // 5. Save risk assessment
+      // 6. Save risk assessment
+      lastStep = "6.createRiskAssessment";
+      console.log("[Save] Step 6: saving risk assessment...");
+      console.log("[Save] Step 6: risk data =", {
+        score: analysisResult.risk.riskScore,
+        category: analysisResult.risk.riskCategory,
+        priority: analysisResult.risk.priority,
+        factorsCount: analysisResult.risk.factors.length,
+      });
       await createRiskAssessment({
         inspectionId,
         userId: user._id,
@@ -174,8 +208,11 @@ export default function Inspect() {
         recommendedAction: analysisResult.risk.recommendedAction,
         disclaimer: analysisResult.risk.disclaimer,
       });
+      console.log("[Save] Step 6 OK: risk assessment saved");
 
-      // 6. Mark inspection as completed (or failed if no model)
+      // 7. Mark inspection as completed or failed
+      lastStep = "7.completeInspection";
+      console.log("[Save] Step 7: completing inspection...");
       if (analysisResult.modelConnected) {
         await completeInspection({ id: inspectionId });
       } else {
@@ -184,12 +221,16 @@ export default function Inspect() {
           reason: analysisResult.modelNote,
         });
       }
+      console.log("[Save] Step 7 OK: inspection completed");
 
       setSavedInspectionId(inspectionId);
       setSaveStatus("saved");
+      setSaveError(null);
     } catch (error) {
-      console.error("Failed to save inspection to Convex:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[Save] FAILED at step ${lastStep}:`, msg, error);
       setSaveStatus("save_failed");
+      setSaveError(`[${lastStep}] ${msg}`);
     }
   };
 
@@ -199,6 +240,7 @@ export default function Inspect() {
     setIsAnalyzing(true);
     setResult(null);
     setSaveStatus("idle");
+    setSaveError(null);
     setSavedInspectionId(null);
 
     try {
@@ -656,9 +698,16 @@ export default function Inspect() {
                           </div>
                         )}
                         {saveStatus === "save_failed" && (
-                          <div className="flex items-center gap-1.5 text-xs text-risk-critical">
-                            <XCircle className="size-3" />
-                            Save failed
+                          <div className="flex flex-col gap-1 text-xs text-risk-critical">
+                            <div className="flex items-center gap-1.5">
+                              <XCircle className="size-3 shrink-0" />
+                              Save failed
+                            </div>
+                            {saveError && (
+                              <p className="text-[10px] text-risk-critical/70 font-mono leading-relaxed">
+                                {saveError}
+                              </p>
+                            )}
                           </div>
                         )}
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
