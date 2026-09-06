@@ -563,10 +563,25 @@ export async function getModelStatus(
  * Run YOLOv8 inference on an image element for a specific model config.
  * Returns raw detections before severity/risk scoring.
  */
+export interface InferenceResult {
+  detections: RawDetection[];
+  /** Width of the image actually fed to the model (after pre-resize) */
+  imageWidth: number;
+  /** Height of the image actually fed to the model (after pre-resize) */
+  imageHeight: number;
+}
+
+/**
+ * Run YOLOv8 inference on an image element for a specific model config.
+ * Returns raw detections and the effective image dimensions used for inference.
+ * The image dimensions reflect any pre-resizing that occurred, so callers
+ * should use imageWidth × imageHeight (not the original HTMLImageElement size)
+ * when computing area ratios for severity estimation.
+ */
 export async function runInference(
   imageSource: HTMLImageElement | HTMLCanvasElement,
   config?: ModelConfig
-): Promise<RawDetection[]> {
+): Promise<InferenceResult> {
   const cfg = config ?? ROAD_MODEL_CONFIG;
   const session = await getModelSessionForConfig(cfg);
 
@@ -590,7 +605,7 @@ export async function runInference(
     cfg.classNames
   );
 
-  return detections;
+  return { detections, imageWidth: resizedW, imageHeight: resizedH };
 }
 
 /** Get the source a specific model was loaded from (after first inference) */

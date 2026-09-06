@@ -20,6 +20,7 @@ import {
   getRiskColor,
   getPriorityColor,
 } from "@/lib/risk-engine";
+import type { Id } from "@/convex/_generated/dataModel";
 
 export default function Reports() {
   const { user } = useAuth();
@@ -96,7 +97,7 @@ export default function Reports() {
   // Query detections for selected inspection
   const detections = useQuery(
     api.inspections.listDetectionsByInspection,
-    selectedInspectionId ? { inspectionId: selectedInspectionId as any } : "skip"
+    selectedInspectionId ? { inspectionId: selectedInspectionId as Id<"inspections"> } : "skip"
   );
 
   return (

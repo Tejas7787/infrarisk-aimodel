@@ -524,10 +524,9 @@ function EmptyState() {
         <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto leading-relaxed">
           Start by analyzing an infrastructure image. Your inspections, detections,
           and risk assessments will appear here.
-        </p>
-        <p className="mt-3 text-xs text-muted-foreground/60">
-          Try the demo mode on the AI Inspection page to see sample results.
-        </p>
+        </p>          <p className="mt-3 text-xs text-muted-foreground/60">
+          Run an AI inspection on the Inspection page to start populating this dashboard.
+          </p>
       </CardContent>
     </Card>
   );

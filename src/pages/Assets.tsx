@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { useAuth } from "@/hooks/use-auth";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,9 +17,9 @@ import {
   FolderOpen,
   Search,
   MapPin,
+  Loader2,
 } from "lucide-react";
 import {
-  DEMO_ASSETS,
   INFRA_TYPE_INFO,
   type MaintenanceStatus,
 } from "@/lib/types";
@@ -38,16 +41,46 @@ const STATUS_STYLES: Record<MaintenanceStatus, string> = {
 };
 
 export default function Assets() {
+  const { user } = useAuth();
   const [filterType, setFilterType] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [search, setSearch] = useState("");
 
-  const assets = DEMO_ASSETS.filter(
-    (a) => filterType === "all" || a.infraType === filterType
-  )
-    .filter(
-      (a) => filterStatus === "all" || a.status === filterStatus
-    )
+  const dbAssets = useQuery(
+    api.assets.list,
+    user?._id ? { userId: user._id } : "skip"
+  );
+
+  if (!dbAssets) {
+    return (
+      <AppShell>
+        <div className="p-4 md:p-8 max-w-[1400px] mx-auto pb-24 md:pb-8">
+          <header className="mb-6 md:mb-8">
+            <div className="flex items-center gap-3 mb-1">
+              <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10">
+                <FolderOpen className="size-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+                  Management
+                </p>
+                <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
+                  Assets
+                </h1>
+              </div>
+            </div>
+          </header>
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const assets = dbAssets
+    .filter((a) => filterType === "all" || a.infraType === filterType)
+    .filter((a) => filterStatus === "all" || a.status === filterStatus)
     .filter(
       (a) =>
         search === "" ||
@@ -72,8 +105,8 @@ export default function Assets() {
               </h1>
             </div>
           </div>
-          <Badge variant="outline" className="text-[11px] bg-amber-500/10 text-amber-400 border-amber-500/20">
-            DEMO DATA
+          <Badge variant="outline" className="text-[11px] bg-risk-low/10 text-risk-low border-risk-low/20">
+            {dbAssets.length} Asset{dbAssets.length !== 1 ? "s" : ""}
           </Badge>
         </header>
 
@@ -139,7 +172,7 @@ export default function Assets() {
           <div className="grid gap-3 md:gap-4 md:grid-cols-2 lg:grid-cols-3">
             {assets.map((asset) => (
               <Card
-                key={asset.assetId}
+                key={asset._id}
                 className="bg-card border-border/60 hover:border-border transition-colors group"
               >
                 <CardContent className="p-5">
@@ -149,17 +182,17 @@ export default function Assets() {
                         {asset.assetId}
                       </p>
                       <p className="text-[11px] text-muted-foreground capitalize mt-0.5">
-                        {INFRA_TYPE_INFO[asset.infraType]?.icon}{" "}
-                        {INFRA_TYPE_INFO[asset.infraType]?.label ?? asset.infraType}
+                        {INFRA_TYPE_INFO[asset.infraType as keyof typeof INFRA_TYPE_INFO]?.icon}{" "}
+                        {INFRA_TYPE_INFO[asset.infraType as keyof typeof INFRA_TYPE_INFO]?.label ?? asset.infraType}
                       </p>
                     </div>
                     <Badge
                       variant="outline"
                       className={`text-[10px] font-semibold border-0 ${
-                        STATUS_STYLES[asset.status as MaintenanceStatus]
+                        STATUS_STYLES[asset.status as MaintenanceStatus] ?? "bg-surface-3 text-muted-foreground"
                       }`}
                     >
-                      {STATUS_LABELS[asset.status as MaintenanceStatus]}
+                      {STATUS_LABELS[asset.status as MaintenanceStatus] ?? asset.status}
                     </Badge>
                   </div>
 
@@ -170,7 +203,7 @@ export default function Assets() {
                     </div>
                   )}
 
-                  {asset.latitude && asset.longitude && (
+                  {asset.latitude != null && asset.longitude != null && (
                     <p className="text-[11px] text-muted-foreground/50 mt-2 font-mono">
                       {asset.latitude.toFixed(4)}, {asset.longitude.toFixed(4)}
                     </p>

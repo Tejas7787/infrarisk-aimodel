@@ -34,6 +34,7 @@ import {
   BRIDGE_MODEL_CONFIG,
   type ModelConfig,
   type RawDetection,
+  type InferenceResult,
 } from "./yolo-inference";
 
 export interface DetectedDefect {
@@ -100,8 +101,8 @@ async function analyzeRoad(
     throw new Error("MODEL_NOT_CONNECTED");
   }
 
-  const rawDetections = await runInference(imageEl, ROAD_MODEL_CONFIG);
-  const imageArea = imageEl.naturalWidth * imageEl.naturalHeight;
+  const { detections: rawDetections, imageWidth, imageHeight } = await runInference(imageEl, ROAD_MODEL_CONFIG);
+  const imageArea = imageWidth * imageHeight;
 
   const defects: DetectedDefect[] = rawDetections.map((det: RawDetection) => {
     const internalName = RDD2022_INTERNAL_NAMES[det.className as keyof typeof RDD2022_INTERNAL_NAMES] ?? det.className;
@@ -171,8 +172,8 @@ async function analyzeBridge(
     throw new Error("MODEL_NOT_CONNECTED");
   }
 
-  const rawDetections = await runInference(imageEl, BRIDGE_MODEL_CONFIG);
-  const imageArea = imageEl.naturalWidth * imageEl.naturalHeight;
+  const { detections: rawDetections, imageWidth, imageHeight } = await runInference(imageEl, BRIDGE_MODEL_CONFIG);
+  const imageArea = imageWidth * imageHeight;
 
   const defects: DetectedDefect[] = rawDetections.map((det: RawDetection) => {
     const bboxArea = det.bbox.width * det.bbox.height;
