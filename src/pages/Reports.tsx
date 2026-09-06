@@ -134,7 +134,7 @@ export default function Reports() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 md:gap-5 xl:grid-cols-[1fr_1fr]">
+          <div className="grid gap-4 md:gap-5 grid-cols-1 xl:grid-cols-[1fr_1fr]">
             {/* Report List */}
             <div className="space-y-2">
               {reportData.map((report) => {

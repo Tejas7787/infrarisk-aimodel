@@ -140,23 +140,25 @@ async function analyzeRoad(
 // Bridge analysis: YOLOv8 ONNX (crack detection)
 // ---------------------------------------------------------------------------
 
-/** Severity estimation for bridge crack detections */
+/** Severity estimation for bridge crack detections.
+ * Bridge cracks are structural concerns — base severity starts at "medium"
+ * (not "low") and escalation thresholds are tighter than road defects. */
 function estimateBridgeSeverity(
   confidence: number,
   bboxArea: number,
   imageArea: number
 ): SeverityLevel {
   const severityOrder: SeverityLevel[] = ["low", "medium", "high", "critical"];
-  let idx = 0; // start at "low"
+  let idx = 1; // bridge cracks always at least "medium" — they are structural defects
 
-  // High confidence elevates severity
-  if (confidence > 0.85) idx = Math.min(idx + 1, 3); // → medium
-  if (confidence > 0.95) idx = Math.min(idx + 1, 3); // → high
+  // Confidence-based escalation
+  if (confidence > 0.80) idx = Math.min(idx + 1, 3); // → high
+  if (confidence > 0.93) idx = Math.min(idx + 1, 3); // → critical
 
-  // Large crack relative to image elevates severity
+  // Size-based escalation: large cracks in bridge structures are high risk
   const areaRatio = bboxArea / imageArea;
-  if (areaRatio > 0.1) idx = Math.min(idx + 1, 3);
-  if (areaRatio > 0.25) idx = Math.min(idx + 1, 3);
+  if (areaRatio > 0.08) idx = Math.min(idx + 1, 3);
+  if (areaRatio > 0.20) idx = Math.min(idx + 1, 3);
 
   return severityOrder[Math.min(idx, 3)];
 }

@@ -144,16 +144,16 @@ export function calculateRisk(
 
   // Determine category
   let riskCategory: RiskCategory;
-  if (riskScore >= 80) riskCategory = "CRITICAL";
-  else if (riskScore >= 55) riskCategory = "HIGH";
-  else if (riskScore >= 30) riskCategory = "MODERATE";
+  if (riskScore >= 75) riskCategory = "CRITICAL";
+  else if (riskScore >= 50) riskCategory = "HIGH";
+  else if (riskScore >= 25) riskCategory = "MODERATE";
   else riskCategory = "LOW";
 
   // Determine priority
   let priority: Priority;
-  if (riskScore >= 80) priority = "P1";
-  else if (riskScore >= 55) priority = "P2";
-  else if (riskScore >= 30) priority = "P3";
+  if (riskScore >= 75) priority = "P1";
+  else if (riskScore >= 50) priority = "P2";
+  else if (riskScore >= 25) priority = "P3";
   else priority = "P4";
 
   // Build explanation

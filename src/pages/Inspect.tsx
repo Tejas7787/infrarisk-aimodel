@@ -590,8 +590,8 @@ export default function Inspect() {
               >
                 {isAnalyzing ? (
                   <>
-                    <Loader2 className="size-4 animate-spin" />
-                    {analyzingProgress || "Analyzing..."}
+                    <Loader2 className="size-4 shrink-0 animate-spin" />
+                    <span className="truncate">{analyzingProgress || "Analyzing..."}</span>
                   </>
                 ) : (
                   <>
@@ -689,8 +689,8 @@ export default function Inspect() {
 
                 {/* Analysis Status */}
                 <Card className="bg-card border-border/60">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
+                  <CardContent className="p-3 md:p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-3">
                         {result.success ? (
                           <div className="flex size-8 items-center justify-center rounded-lg bg-risk-low/10">
@@ -857,12 +857,12 @@ export default function Inspect() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-5">
-                        <div className="grid grid-cols-3 gap-3">
-                          <div className="col-span-1 rounded-xl bg-surface-2 p-4 text-center border border-border/30">
-                            <p className="text-4xl font-bold tracking-tight text-foreground">
+                        <div className="grid grid-cols-3 gap-2 md:gap-3">
+                          <div className="col-span-1 rounded-xl bg-surface-2 p-3 md:p-4 text-center border border-border/30">
+                            <p className="text-2xl md:text-4xl font-bold tracking-tight text-foreground">
                               {result.risk.riskScore}
                             </p>
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mt-1">
+                            <p className="text-[10px] md:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mt-1">
                               Risk Score
                             </p>
                           </div>
@@ -903,11 +903,11 @@ export default function Inspect() {
                           <div className="h-2.5 rounded-full bg-surface-3 overflow-hidden">
                             <div
                               className={`h-full rounded-full transition-all duration-700 ${
-                                result.risk.riskScore >= 80
+                                result.risk.riskScore >= 75
                                   ? "bg-risk-critical"
-                                  : result.risk.riskScore >= 55
+                                  : result.risk.riskScore >= 50
                                   ? "bg-risk-high"
-                                  : result.risk.riskScore >= 30
+                                  : result.risk.riskScore >= 25
                                   ? "bg-risk-moderate"
                                   : "bg-risk-low"
                               }`}

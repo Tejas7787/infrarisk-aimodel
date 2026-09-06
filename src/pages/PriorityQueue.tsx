@@ -112,8 +112,8 @@ export default function PriorityQueue() {
         {/* Filters */}
         <Card className="bg-card border-border/60 mb-4 md:mb-6">
           <CardContent className="p-3 md:p-4">
-            <div className="flex flex-wrap gap-2 md:gap-3 items-end">
-              <div className="flex-1 min-w-[180px]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex gap-2 md:gap-3 items-end">
+              <div className="flex-1 min-w-[180px] sm:col-span-2 lg:col-span-1">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                   <Input
@@ -125,7 +125,7 @@ export default function PriorityQueue() {
                 </div>
               </div>
               <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-[130px] bg-surface-2 border-border/60 text-sm">
+                <SelectTrigger className="w-full sm:w-[130px] bg-surface-2 border-border/60 text-sm">
                   <SelectValue placeholder="Type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -138,7 +138,7 @@ export default function PriorityQueue() {
                 </SelectContent>
               </Select>
               <Select value={filterRisk} onValueChange={setFilterRisk}>
-                <SelectTrigger className="w-[130px] bg-surface-2 border-border/60 text-sm">
+                <SelectTrigger className="w-full sm:w-[130px] bg-surface-2 border-border/60 text-sm">
                   <SelectValue placeholder="Risk" />
                 </SelectTrigger>
                 <SelectContent>
@@ -150,7 +150,7 @@ export default function PriorityQueue() {
                 </SelectContent>
               </Select>
               <Select value={filterPriority} onValueChange={setFilterPriority}>
-                <SelectTrigger className="w-[130px] bg-surface-2 border-border/60 text-sm">
+                <SelectTrigger className="w-full sm:w-[130px] bg-surface-2 border-border/60 text-sm">
                   <SelectValue placeholder="Priority" />
                 </SelectTrigger>
                 <SelectContent>
