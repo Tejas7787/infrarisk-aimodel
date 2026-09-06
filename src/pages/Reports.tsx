@@ -20,7 +20,7 @@ import {
   getRiskColor,
   getPriorityColor,
 } from "@/lib/risk-engine";
-import type { Id } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 
 export default function Reports() {
   const { user } = useAuth();
@@ -79,7 +79,7 @@ export default function Reports() {
     .map((inspection) => {
       const asset = assetMap.get(inspection.assetId);
       const risk = (riskAssessments ?? []).find(
-        (r) => r.inspectionId === inspection._id
+        (r: Doc<"riskAssessments">) => r.inspectionId === inspection._id
       );
       return {
         inspection,
@@ -91,7 +91,11 @@ export default function Reports() {
 
   // Get the selected report's detections
   const selectedReport = reportData.find(
-    (r) => r.inspection._id === selectedInspectionId
+    (r: {
+      inspection: Doc<"inspections">;
+      asset: Doc<"assets"> | undefined;
+      risk: Doc<"riskAssessments"> | undefined;
+    }) => r.inspection._id === selectedInspectionId
   );
 
   // Query detections for selected inspection
@@ -138,7 +142,11 @@ export default function Reports() {
           <div className="grid gap-4 md:gap-5 grid-cols-1 xl:grid-cols-[1fr_1fr]">
             {/* Report List */}
             <div className="space-y-2">
-              {reportData.map((report) => {
+              {reportData.map((report: {
+                inspection: Doc<"inspections">;
+                asset: Doc<"assets"> | undefined;
+                risk: Doc<"riskAssessments"> | undefined;
+              }) => {
                 const infraType = report.inspection.infraType as InfraType;
                 const isSelected = selectedInspectionId === report.inspection._id;
                 return (
@@ -318,7 +326,7 @@ export default function Reports() {
                       </h3>
                       {detections && detections.length > 0 ? (
                         <div className="space-y-2">
-                          {detections.map((d) => (
+                          {detections.map((d: Doc<"detections">) => (
                             <div
                               key={d._id}
                               className="flex items-center justify-between rounded-xl border border-border/40 bg-surface-2 p-3.5"
