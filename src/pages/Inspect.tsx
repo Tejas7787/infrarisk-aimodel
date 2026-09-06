@@ -120,13 +120,34 @@ export default function Inspect() {
     try {
       // 1. Upload image to Convex storage
       lastStep = "1.upload";
-      console.log("[Save] Step 1: uploading image to Convex storage...");
-      const uploadUrl = await generateUploadUrl();
-      const uploadResponse = await fetch(uploadUrl, {
-        method: "POST",
-        headers: { "Content-Type": selectedFile.type },
-        body: selectedFile,
+      console.log("[Save] Step 1: generating upload URL...");
+      let uploadUrl: string;
+      try {
+        uploadUrl = await generateUploadUrl();
+      } catch (urlErr) {
+        throw new Error(`generateUploadUrl failed: ${urlErr instanceof Error ? urlErr.message : String(urlErr)}`);
+      }
+      if (!uploadUrl || typeof uploadUrl !== "string") {
+        throw new Error(`generateUploadUrl returned invalid value: ${String(uploadUrl)}`);
+      }
+      console.log("[Save] Step 1: upload URL obtained, uploading file...");
+
+      // Read file into a fresh Blob to avoid stale File references in sandboxed environments
+      const fileBuffer = await selectedFile.arrayBuffer();
+      const uploadBlob = new Blob([fileBuffer], {
+        type: selectedFile.type || "application/octet-stream",
       });
+
+      let uploadResponse: Response;
+      try {
+        uploadResponse = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": uploadBlob.type },
+          body: uploadBlob,
+        });
+      } catch (fetchErr) {
+        throw new Error(`fetch to upload URL failed: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`);
+      }
       if (!uploadResponse.ok) {
         const body = await uploadResponse.text().catch(() => "<no body>");
         throw new Error(`Upload HTTP ${uploadResponse.status}: ${body}`);
