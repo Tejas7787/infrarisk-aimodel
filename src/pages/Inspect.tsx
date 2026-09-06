@@ -67,7 +67,11 @@ export default function Inspect() {
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  // Image bytes captured immediately at selection time. The browser can
+  // invalidate the original File reference later (NotReadableError:
+  // "The requested file could not be read"), so Analyze and Save must
+  // never re-read the File — they use these captured bytes instead.
+  const [capturedImage, setCapturedImage] = useState<CapturedImage | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [factorsExpanded, setFactorsExpanded] = useState(false);
@@ -96,22 +100,43 @@ export default function Inspect() {
     : modelStatuses.road;
 
   const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      setSelectedFile(file);
       setResult(null);
       setSaveStatus("idle");
+      setSaveError(null);
       setSavedInspectionId(null);
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
+      try {
+        // Capture the image bytes NOW, while the File reference is fresh.
+        // Reading it later (during Save) fails with NotReadableError in
+        // sandboxed/iframe environments.
+        const bytes = await file.arrayBuffer();
+        const mimeType =
+          file.type || guessImageMimeType(file.name) || "application/octet-stream";
+        setCapturedImage({
+          bytes,
+          fileName: file.name,
+          fileSize: bytes.byteLength,
+          mimeType,
+        });
+        const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+        setPreviewUrl(url);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[FileSelect] Failed to read selected file:", msg);
+        setCapturedImage(null);
+        setPreviewUrl(null);
+        setSaveStatus("save_failed");
+        setSaveError(`[select] Could not read the selected image: ${msg}`);
+      }
     },
     []
   );
 
   // Save the complete inspection pipeline to Convex
   const saveToConvex = async (analysisResult: AnalysisResult) => {
-    if (!user?._id || !selectedFile || !infraType) return;
+    if (!user?._id || !capturedImage || !infraType) return;
 
     setSaveStatus("saving");
     setSaveError(null);
@@ -132,17 +157,21 @@ export default function Inspect() {
       }
       console.log("[Save] Step 1: upload URL obtained, uploading file...");
 
-      // Read file into a fresh Blob to avoid stale File references in sandboxed environments
-      const fileBuffer = await selectedFile.arrayBuffer();
-      const uploadBlob = new Blob([fileBuffer], {
-        type: selectedFile.type || "application/octet-stream",
+      if (capturedImage.bytes.byteLength === 0) {
+        throw new Error("Captured image is empty");
+      }
+
+      // Build the upload Blob from bytes captured at selection time —
+      // the original File object is never re-read here.
+      const uploadBlob = new Blob([capturedImage.bytes], {
+        type: capturedImage.mimeType,
       });
 
       let uploadResponse: Response;
       try {
         uploadResponse = await fetch(uploadUrl, {
           method: "POST",
-          headers: { "Content-Type": uploadBlob.type },
+          headers: { "Content-Type": capturedImage.mimeType },
           body: uploadBlob,
         });
       } catch (fetchErr) {
@@ -176,9 +205,9 @@ export default function Inspect() {
         userId: user._id,
         assetId: assetRecordId,
         storageId,
-        fileName: selectedFile.name,
-        fileSize: selectedFile.size,
-        mimeType: selectedFile.type,
+        fileName: capturedImage.fileName,
+        fileSize: capturedImage.fileSize,
+        mimeType: capturedImage.mimeType,
         infraType,
       });
       console.log("[Save] Step 3 OK: imageRecordId =", imageRecordId);
@@ -266,7 +295,7 @@ export default function Inspect() {
   };
 
   const handleAnalyze = async () => {
-    if (!infraType || !selectedFile) return;
+    if (!infraType || !capturedImage) return;
 
     setIsAnalyzing(true);
     setAnalyzingProgress("Reading image file...");
@@ -279,7 +308,9 @@ export default function Inspect() {
       // Step 1: Read the file
       let imageData: string;
       try {
-        imageData = await fileToDataUrl(selectedFile);
+        imageData = await fileToDataUrl(
+          new Blob([capturedImage.bytes], { type: capturedImage.mimeType })
+        );
       } catch (readErr) {
         const msg = readErr instanceof Error ? readErr.message : String(readErr);
         setResult({
@@ -348,17 +379,17 @@ export default function Inspect() {
     setInfraType("");
     setAssetId("");
     setLocation("");
-    setNotes("");
-    setPreviewUrl(null);
-    setSelectedFile(null);
+    setNotes("");    setPreviewUrl(null);
+    setCapturedImage(null);
     setResult(null);
+
     setFactorsExpanded(false);
     setSaveStatus("idle");
     setSavedInspectionId(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const hasImage = !!selectedFile;
+  const hasImage = !!capturedImage;
   const canAnalyze = !!infraType && hasImage;
 
   return (
@@ -563,7 +594,7 @@ export default function Inspect() {
                         variant="secondary"
                         onClick={() => {
                           setPreviewUrl(null);
-                          setSelectedFile(null);
+                          setCapturedImage(null);
                           setResult(null);
                           setSaveStatus("idle");
                           setSavedInspectionId(null);
@@ -575,10 +606,10 @@ export default function Inspect() {
                         Remove Image
                       </Button>
                     </div>
-                    {selectedFile && (
+                    {capturedImage && (
                       <div className="absolute top-2 right-2">
                         <Badge className="bg-surface-2/90 text-foreground text-[10px] border-border/60">
-                          {selectedFile.name}
+                          {capturedImage.fileName}
                         </Badge>
                       </div>
                     )}
@@ -1032,7 +1063,35 @@ export default function Inspect() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fileToDataUrl(file: File): Promise<string> {
+/** Image bytes + metadata captured at file-selection time. */
+interface CapturedImage {
+  bytes: ArrayBuffer;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+}
+
+/** Fallback MIME detection when the browser does not populate File.type. */
+function guessImageMimeType(fileName: string): string | null {
+  const ext = fileName.split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    case "bmp":
+      return "image/bmp";
+    default:
+      return null;
+  }
+}
+
+function fileToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -1040,6 +1099,6 @@ function fileToDataUrl(file: File): Promise<string> {
       const detail = reader.error?.message || reader.error?.name || "unknown error";
       reject(new Error(`Failed to read file: ${detail}`));
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
 }
