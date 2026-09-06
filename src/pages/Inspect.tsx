@@ -71,6 +71,7 @@ export default function Inspect() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [factorsExpanded, setFactorsExpanded] = useState(false);
+  const [analyzingProgress, setAnalyzingProgress] = useState<string>("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedInspectionId, setSavedInspectionId] = useState<string | null>(null);
@@ -247,6 +248,7 @@ export default function Inspect() {
     if (!infraType || !selectedFile) return;
 
     setIsAnalyzing(true);
+    setAnalyzingProgress("Reading image file...");
     setResult(null);
     setSaveStatus("idle");
     setSaveError(null);
@@ -281,6 +283,7 @@ export default function Inspect() {
       }
 
       // Step 2: Run AI analysis
+      setAnalyzingProgress("Running YOLOv8 inference...");
       const analysisResult = await analyzeInfrastructure(
         infraType as InfraType,
         imageData,
@@ -291,6 +294,7 @@ export default function Inspect() {
 
       // Step 3: Save to Convex (analysis succeeded or failed — save either way)
       if (user?._id) {
+        setAnalyzingProgress("Saving results to database...");
         await saveToConvex(analysisResult);
       }
     } catch (err) {
@@ -315,6 +319,7 @@ export default function Inspect() {
       });
     } finally {
       setIsAnalyzing(false);
+      setAnalyzingProgress("");
     }
   };
 
@@ -586,7 +591,7 @@ export default function Inspect() {
                 {isAnalyzing ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
-                    Running inference...
+                    {analyzingProgress || "Analyzing..."}
                   </>
                 ) : (
                   <>
@@ -637,7 +642,7 @@ export default function Inspect() {
                     Running inference...
                   </h3>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Loading model, preprocessing image, running detection
+                    {analyzingProgress || "Loading model, preprocessing image, running detection"}
                   </p>
                 </CardContent>
               </Card>

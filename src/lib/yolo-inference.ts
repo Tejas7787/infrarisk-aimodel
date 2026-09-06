@@ -95,8 +95,14 @@ export const BRIDGE_MODEL_CONFIG: ModelConfig = {
 // ---------------------------------------------------------------------------
 
 const MODEL_SIZE = 640; // YOLOv8 default input size
-const CONFIDENCE_THRESHOLD = 0.25;
+const CONFIDENCE_THRESHOLD = 0.15; // Lowered from 0.25 for better recall on infrastructure images
 const IOU_THRESHOLD = 0.45;
+
+/** Maximum dimension (width or height) before the source image is downscaled.
+ * Large phone photos (12 MP+) waste time and memory if fed directly into the
+ * 640×640 letterbox. Pre-shrinking to ≤1280 px keeps inference fast and
+ * accurate without losing meaningful detail. */
+const MAX_INPUT_DIMENSION = 1280;
 
 // A real YOLOv8 ONNX model is tens of MB. Anything below this is a placeholder
 // (e.g. an un-materialized Git LFS pointer, which is ~133 bytes) — detect it so
@@ -274,19 +280,14 @@ async function getModelSessionForConfig(
 // Image preprocessing: resize + normalize to NCHW float32
 // ---------------------------------------------------------------------------
 
-function preprocessImage(
+/**
+ * Pre-resize large images (e.g. 12 MP phone photos) before letterboxing.
+ * This avoids allocating a huge canvas and keeps inference fast.
+ */
+function preResize(
   imageSource: HTMLImageElement | HTMLCanvasElement,
-  targetSize: number
-): { tensor: ort.Tensor; pad: { padX: number; padY: number; scale: number } } {
-  const canvas = document.createElement("canvas");
-  canvas.width = targetSize;
-  canvas.height = targetSize;
-  const ctx = canvas.getContext("2d")!;
-
-  // Fill with grey letterbox
-  ctx.fillStyle = "#808080";
-  ctx.fillRect(0, 0, targetSize, targetSize);
-
+  maxDim: number
+): HTMLCanvasElement {
   const srcW =
     imageSource instanceof HTMLImageElement
       ? imageSource.naturalWidth
@@ -296,13 +297,46 @@ function preprocessImage(
       ? imageSource.naturalHeight
       : imageSource.height;
 
+  const longest = Math.max(srcW, srcH);
+  if (longest <= maxDim) return imageSource as HTMLCanvasElement;
+
+  const scale = maxDim / longest;
+  const newW = Math.round(srcW * scale);
+  const newH = Math.round(srcH * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = newW;
+  canvas.height = newH;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(imageSource, 0, 0, newW, newH);
+  return canvas;
+}
+
+function preprocessImage(
+  imageSource: HTMLImageElement | HTMLCanvasElement,
+  targetSize: number
+): { tensor: ort.Tensor; pad: { padX: number; padY: number; scale: number }; resizedW: number; resizedH: number } {
+  // Pre-resize large images before letterboxing
+  const resized = preResize(imageSource, MAX_INPUT_DIMENSION);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetSize;
+  canvas.height = targetSize;
+  const ctx = canvas.getContext("2d")!;
+
+  // Fill with grey letterbox
+  ctx.fillStyle = "#808080";
+  ctx.fillRect(0, 0, targetSize, targetSize);
+
+  const srcW = resized.width;
+  const srcH = resized.height;
+
   const scale = Math.min(targetSize / srcW, targetSize / srcH);
   const newW = srcW * scale;
   const newH = srcH * scale;
   const padX = (targetSize - newW) / 2;
   const padY = (targetSize - newH) / 2;
 
-  ctx.drawImage(imageSource, padX, padY, newW, newH);
+  ctx.drawImage(resized, padX, padY, newW, newH);
 
   const imageData = ctx.getImageData(0, 0, targetSize, targetSize);
   const pixels = imageData.data;
@@ -319,7 +353,7 @@ function preprocessImage(
   }
 
   const tensor = new ort.Tensor("float32", chw, [1, 3, targetSize, targetSize]);
-  return { tensor, pad: { padX, padY, scale } };
+  return { tensor, pad: { padX, padY, scale }, resizedW: srcW, resizedH: srcH };
 }
 
 // ---------------------------------------------------------------------------
@@ -536,17 +570,8 @@ export async function runInference(
   const cfg = config ?? ROAD_MODEL_CONFIG;
   const session = await getModelSessionForConfig(cfg);
 
-  const origW =
-    imageSource instanceof HTMLImageElement
-      ? imageSource.naturalWidth
-      : imageSource.width;
-  const origH =
-    imageSource instanceof HTMLImageElement
-      ? imageSource.naturalHeight
-      : imageSource.height;
-
-  // Preprocess
-  const { tensor, pad } = preprocessImage(imageSource, MODEL_SIZE);
+  // Preprocess (includes pre-resize for large images)
+  const { tensor, pad, resizedW, resizedH } = preprocessImage(imageSource, MODEL_SIZE);
 
   // Run inference
   const inputName = session.inputNames[0];
@@ -554,12 +579,12 @@ export async function runInference(
   const outputName = session.outputNames[0];
   const outputTensor = results[outputName];
 
-  // Postprocess
+  // Postprocess using the resized dimensions (not the original image size)
   const detections = postprocess(
     outputTensor,
     pad,
-    origW,
-    origH,
+    resizedW,
+    resizedH,
     CONFIDENCE_THRESHOLD,
     IOU_THRESHOLD,
     cfg.classNames
