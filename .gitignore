@@ -2,3 +2,9 @@
 node_modules
 dist
 
+
+isolate/
+
+# Stale debugging files
+push-via-api.mjs
+infra-risk-fix.patch

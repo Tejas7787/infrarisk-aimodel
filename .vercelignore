@@ -1,0 +1,12 @@
+# Freebuff build artifacts — rebuilt by Vercel's build step
+isolate/
+
+# Stale files from previous debugging
+push-via-api.mjs
+infra-risk-fix.patch
+
+# Convex local state
+.convex/
+
+# Vly local dev state
+.vly-run/
