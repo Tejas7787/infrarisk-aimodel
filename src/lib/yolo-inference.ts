@@ -85,7 +85,7 @@ export const ROAD_MODEL_CONFIG: ModelConfig = {
   id: ROAD_MODEL_ID,
   bundledUrl: "/models/road-yolov8.onnx", // fallback for local dev if model is in public/
   externalUrl:
-    "https://github.com/Tejas7787/infrarisk-aimodel/releases/download/v1.0/road-yolov8.onnx",
+    "https://raw.githubusercontent.com/Tejas7787/infrarisk-aimodel/main/models/road-yolov8.onnx",
   classNames: RDD2022_CLASSES,
   labels: RDD2022_LABELS,
   internalNames: RDD2022_INTERNAL_NAMES,
