@@ -34,8 +34,10 @@ import {
 export interface ModelConfig {
   /** Unique identifier for this model (matches model-storage IDs) */
   id: string;
-  /** Path to the bundled ONNX model asset */
+  /** Path to the bundled ONNX model asset (served from dist/) */
   bundledUrl: string;
+  /** External URL to fetch the model from (used when bundled asset is >25 MiB) */
+  externalUrl?: string;
   /** Human-readable class labels indexed by class ID */
   classNames: readonly string[];
   /** Human-friendly display names for each class */
@@ -72,10 +74,18 @@ export const RDD2022_INTERNAL_NAMES: Record<RDD2022Class, string> = {
   D40: "pothole",
 };
 
-/** Road model configuration (RDD2022-trained YOLOv8s, 4 classes) */
+/**
+ * Road model configuration (RDD2022-trained YOLOv8s, 4 classes)
+ *
+ * The 43 MiB ONNX model exceeds Cloudflare Pages' 25 MiB per-file limit,
+ * so it cannot be bundled in dist/. It is hosted as a GitHub Release asset
+ * and fetched at runtime.
+ */
 export const ROAD_MODEL_CONFIG: ModelConfig = {
   id: ROAD_MODEL_ID,
-  bundledUrl: "/models/road-yolov8.onnx",
+  bundledUrl: "/models/road-yolov8.onnx", // fallback for local dev if model is in public/
+  externalUrl:
+    "https://github.com/Tejas7787/infrarisk-aimodel/releases/download/v1.0/road-yolov8.onnx",
   classNames: RDD2022_CLASSES,
   labels: RDD2022_LABELS,
   internalNames: RDD2022_INTERNAL_NAMES,
@@ -218,7 +228,34 @@ async function fetchModelBytes(config: ModelConfig): Promise<{
     // IndexedDB error — fall through
   }
 
-  // 2. Load bundled static asset (the permanent default)
+  // 2. Load from external URL (for models >25 MiB that can't be bundled)
+  if (config.externalUrl) {
+    try {
+      const resp = await fetch(config.externalUrl);
+      if (resp.ok) {
+        const bytes = await resp.arrayBuffer();
+        if (!isValidOnnxBuffer(bytes)) {
+          console.error(
+            `[yolo-inference] External model at ${config.externalUrl} is not a valid ` +
+              `ONNX file (${bytes.byteLength} bytes) — download failed or wrong content?`
+          );
+        } else {
+          return { bytes, source: "bundled" };
+        }
+      } else {
+        console.warn(
+          `[yolo-inference] External model fetch failed: ${resp.status} ${resp.statusText} ` +
+            `from ${config.externalUrl}`
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[yolo-inference] External model fetch error:`, err
+      );
+    }
+  }
+
+  // 3. Load bundled static asset (the permanent default)
   try {
     const resp = await fetch(config.bundledUrl);
     if (resp.ok) {
