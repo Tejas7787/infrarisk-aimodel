@@ -205,7 +205,7 @@ export interface RawDetection {
   bbox: { x: number; y: number; width: number; height: number }; // pixels in original image
 }
 
-export type ModelLoadSource = "bundled" | "uploaded" | "none";
+export type ModelLoadSource = "bundled" | "uploaded" | "external" | "none";
 
 // ---------------------------------------------------------------------------
 // Per-model session management
@@ -247,7 +247,7 @@ async function fetchModelBytes(config: ModelConfig): Promise<{
               `ONNX file (${bytes.byteLength} bytes) — download failed or wrong content?`
           );
         } else {
-          return { bytes, source: "bundled" };
+          return { bytes, source: "external" };
         }
       } else {
         console.warn(
