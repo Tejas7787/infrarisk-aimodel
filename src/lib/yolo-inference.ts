@@ -78,14 +78,20 @@ export const RDD2022_INTERNAL_NAMES: Record<RDD2022Class, string> = {
  * Road model configuration (RDD2022-trained YOLOv8s, 4 classes)
  *
  * The 43 MiB ONNX model exceeds Cloudflare Pages' 25 MiB per-file limit,
- * so it cannot be bundled in dist/. It is hosted as a GitHub Release asset
- * and fetched at runtime.
+ * so it cannot be bundled in dist/. It is hosted on Cloudflare R2 and
+ * fetched at runtime.
+ *
+ * SETUP: Upload road-yolov8.onnx to a Cloudflare R2 public bucket and
+ * paste the full URL below. The bundled fallback at /models/road-yolov8.onnx
+ * is used during local development only.
  */
 export const ROAD_MODEL_CONFIG: ModelConfig = {
   id: ROAD_MODEL_ID,
-  bundledUrl: "/models/road-yolov8.onnx", // fallback for local dev if model is in public/
-  externalUrl:
-    "https://raw.githubusercontent.com/Tejas7787/infrarisk-aimodel/main/public/models/road-yolov8.onnx",
+  bundledUrl: "/models/road-yolov8.onnx", // local dev fallback (file lives in public/models/)
+  // ── Paste your Cloudflare R2 public URL here ───────────────────────
+  // Example: "https://your-r2-bucket.<account-id>.r2.cloudflarestorage.com/road-yolov8.onnx"
+  externalUrl: undefined as string | undefined,
+  // ──────────────────────────────────────────────────────────────────
   classNames: RDD2022_CLASSES,
   labels: RDD2022_LABELS,
   internalNames: RDD2022_INTERNAL_NAMES,
