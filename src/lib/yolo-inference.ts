@@ -36,6 +36,7 @@ export interface ModelConfig {
   id: string;
   /** Path to the bundled ONNX model asset */
   bundledUrl: string;
+  externalUrl?: string;
   /** Human-readable class labels indexed by class ID */
   classNames: readonly string[];
   /** Human-friendly display names for each class */
