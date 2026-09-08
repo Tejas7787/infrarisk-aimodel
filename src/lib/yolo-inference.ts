@@ -76,6 +76,7 @@ export const RDD2022_INTERNAL_NAMES: Record<RDD2022Class, string> = {
 export const ROAD_MODEL_CONFIG: ModelConfig = {
   id: ROAD_MODEL_ID,
   bundledUrl: "/models/road-yolov8.onnx",
+  externalUrl: "https://huggingface.co/Dash7787/infrarisk-road-model/resolve/main/road-yolov8.onnx",
   classNames: RDD2022_CLASSES,
   labels: RDD2022_LABELS,
   internalNames: RDD2022_INTERNAL_NAMES,
