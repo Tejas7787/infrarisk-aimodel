@@ -90,7 +90,8 @@ export const ROAD_MODEL_CONFIG: ModelConfig = {
   bundledUrl: "/models/road-yolov8.onnx", // local dev fallback (file lives in public/models/)
   // ── Paste your Cloudflare R2 public URL here ───────────────────────
   // Example: "https://your-r2-bucket.<account-id>.r2.cloudflarestorage.com/road-yolov8.onnx"
-  externalUrl: undefined as string | undefined,
+  externalUrl:
+    "https://huggingface.co/Dash7787/infrarisk-road-model/resolve/main/road-yolov8.onnx",
   // ──────────────────────────────────────────────────────────────────
   classNames: RDD2022_CLASSES,
   labels: RDD2022_LABELS,
