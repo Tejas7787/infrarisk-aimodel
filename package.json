@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/remove-oversized-wasm.mjs",
+    "build": "tsc -b tsc -b && vite build && node scripts/remove-oversized-wasm.mjstsc -b && vite build && node scripts/remove-oversized-wasm.mjs vite build",
     "lint": "eslint .",
     "format": "prettier --write .",
     "preview": "vite preview"
