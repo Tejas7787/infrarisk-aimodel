@@ -514,6 +514,56 @@ export async function isModelAvailable(config?: ModelConfig): Promise<boolean> {
   // 2. Check external model
   if (cfg.externalUrl) {
     try {
+      const resp = await fetch(cfg.externalUrl, {
+        method: "HEAD",
+      });
+
+      if (resp.ok) {
+        const contentLength = Number(
+          resp.headers.get("content-length") ?? "0"
+        );
+
+        if (contentLength === 0 || contentLength >= MIN_MODEL_BYTES) {
+          return true;
+        }
+      }
+    } catch {
+      // Fall through to bundled model
+    }
+  }
+
+  // 3. Check bundled static asset
+  const probe = await probeBundledModel(cfg.bundledUrl);
+  return probe.valid;
+}
+
+        // Hugging Face may omit Content-Length, so a successful
+        // response is enough to consider the external model reachable.
+        if (contentLength === 0 || contentLength >= MIN_MODEL_BYTES) {
+          return true;
+        }
+      }
+    } catch {
+      // Fall through to bundled model
+    }
+  }
+
+  // 3. Check bundled static asset
+  const probe = await probeBundledModel(cfg.bundledUrl);
+  return probe.valid;
+}
+  const cfg = config ?? ROAD_MODEL_CONFIG;
+
+  // 1. Check IndexedDB override
+  try {
+    if (await isModelStored(cfg.id)) return true;
+  } catch {
+    // Fall through
+  }
+
+  // 2. Check external model
+  if (cfg.externalUrl) {
+    try {
       const resp = await fetch(cfg.externalUrl);
       if (resp.ok) {
         const bytes = await resp.arrayBuffer();
