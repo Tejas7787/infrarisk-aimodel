@@ -78,12 +78,10 @@ export const RDD2022_INTERNAL_NAMES: Record<RDD2022Class, string> = {
  * Road model configuration (RDD2022-trained YOLOv8s, 4 classes)
  *
  * The 43 MiB ONNX model exceeds Cloudflare Pages' 25 MiB per-file limit,
- * so it cannot be bundled in dist/. It is hosted on Cloudflare R2 and
- * fetched at runtime.
+ * so it is loaded from an external Hugging Face URL at runtime.
  *
- * SETUP: Upload road-yolov8.onnx to a Cloudflare R2 public bucket and
- * paste the full URL below. The bundled fallback at /models/road-yolov8.onnx
- * is used during local development only.
+ * The bundled fallback at /models/road-yolov8.onnx is used during
+ * local development only.
  */
 export const ROAD_MODEL_CONFIG: ModelConfig = {
   id: ROAD_MODEL_ID,
@@ -140,10 +138,10 @@ function isValidOnnxBuffer(buffer: ArrayBuffer): boolean {
 }
 
 /**
- * Lightweight probe of a bundled model file that does NOT download the full
- * body: requests only the first 16 bytes via HTTP Range and validates the ONNX
- * magic bytes plus the declared total size. Falls back to just checking the
- * declared size when the server ignores the Range header.
+ * Lightweight probe of a model file that avoids downloading the full body:
+ * performs a normal GET, reads the first chunk of the response, and then
+ * cancels the stream. Validates the ONNX magic bytes and declared size when
+ * available.
  */
 async function probeBundledModel(
   modelUrl: string
@@ -153,21 +151,11 @@ async function probeBundledModel(
   totalBytes: number;
 }> {
   try {
-    const resp = await fetch(modelUrl, {
-      headers: { Range: "bytes=0-15" },
-    });
+    const resp = await fetch(modelUrl);
+
     if (!resp.ok) return { valid: false, reachable: false, totalBytes: 0 };
-
-    // Declared size: Content-Range total (206) or Content-Length (Range ignored)
-    let totalBytes = 0;
-    const contentRange = resp.headers.get("content-range");
-    if (contentRange) {
-      const match = contentRange.match(/\/(\d+)$/);
-      if (match) totalBytes = parseInt(match[1], 10);
-    } else {
-      totalBytes = Number(resp.headers.get("content-length") ?? "0");
-    }
-
+    
+    const totalBytes = Number(resp.headers.get("content-length") ?? "0");
     // Read only the first chunk of the body, then cancel the stream
     const reader = resp.body?.getReader();
     if (reader) {
@@ -515,13 +503,28 @@ function postprocess(
 /** Check if a specific model is available (bundled or uploaded) */
 export async function isModelAvailable(config?: ModelConfig): Promise<boolean> {
   const cfg = config ?? ROAD_MODEL_CONFIG;
+
   // 1. Check IndexedDB override
   try {
     if (await isModelStored(cfg.id)) return true;
   } catch {
     // Fall through
   }
-  // 2. Check bundled static asset (validates ONNX magic + size, not just 200 OK)
+
+  // 2. Check external model
+  if (cfg.externalUrl) {
+    try {
+      const resp = await fetch(cfg.externalUrl);
+      if (resp.ok) {
+        const bytes = await resp.arrayBuffer();
+        if (isValidOnnxBuffer(bytes)) return true;
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  // 3. Check bundled static asset
   const probe = await probeBundledModel(cfg.bundledUrl);
   return probe.valid;
 }
@@ -556,9 +559,26 @@ export async function getModelStatus(
     };
   }
 
-  // 2. Check bundled static asset
-  const probe = await probeBundledModel(cfg.bundledUrl);
+    // 2. Check external model
+  if (cfg.externalUrl) {
+    const externalProbe = await probeBundledModel(cfg.externalUrl);
 
+    if (externalProbe.valid) {
+      return {
+        available: true,
+        message: "AI model loaded (external)",
+        details: [
+          `YOLOv8 ONNX model (${cfg.classNames.length} class${cfg.classNames.length > 1 ? "es" : ""})`,
+          `Classes: ${Object.values(cfg.labels).join(", ")}`,
+          "Runtime: ONNX Runtime Web (WASM)",
+          "Model source: External CDN",
+        ],
+      };
+    }
+  }
+
+  // 3. Check bundled static asset
+  const probe = await probeBundledModel(cfg.bundledUrl);
   if (probe.valid) {
     return {
       available: true,
