@@ -86,10 +86,10 @@ export const RDD2022_INTERNAL_NAMES: Record<RDD2022Class, string> = {
 export const ROAD_MODEL_CONFIG: ModelConfig = {
   id: ROAD_MODEL_ID,
   bundledUrl: "/models/road-yolov8.onnx", // local dev fallback (file lives in public/models/)
-  // ── Paste your Cloudflare R2 public URL here ───────────────────────
-  // Example: "https://your-r2-bucket.<account-id>.r2.cloudflarestorage.com/road-yolov8.onnx"
-  externalUrl:
-    "https://huggingface.co/Dash7787/infrarisk-road-model/resolve/main/road-yolov8.onnx",
+  
+  // External Hugging Face model URL
+externalUrl:
+  "https://huggingface.co/Dash7787/infrarisk-road-model/resolve/main/road-yolov8.onnx",
   // ──────────────────────────────────────────────────────────────────
   classNames: RDD2022_CLASSES,
   labels: RDD2022_LABELS,
